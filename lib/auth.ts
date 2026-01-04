@@ -2,6 +2,21 @@ import NextAuth, { type AuthOptions, type Session } from "next-auth";
 import GoogleProvider from "next-auth/providers/google";
 import { JWT } from "next-auth/jwt";
 
+const resolveAuthSecret = () => {
+  const secret = process.env.NEXTAUTH_SECRET ?? process.env.AUTH_SECRET;
+  if (!secret) {
+    if (process.env.NODE_ENV === "production") {
+      console.warn(
+        "NEXTAUTH_SECRET (or AUTH_SECRET) is not set. Falling back to a default secret; set an environment variable for secure, stable sessions."
+      );
+    }
+    return "taskpulse-fallback-secret";
+  }
+  return secret;
+};
+
+const authSecret = resolveAuthSecret();
+
 const refreshAccessToken = async (token: JWT): Promise<JWT> => {
   try {
     const url = "https://oauth2.googleapis.com/token";
@@ -47,6 +62,7 @@ export const authOptions: AuthOptions = {
   session: {
     strategy: "jwt"
   },
+  secret: authSecret,
   callbacks: {
     async jwt({ token, account }) {
       if (account) {

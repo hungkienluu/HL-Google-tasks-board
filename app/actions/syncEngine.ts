@@ -9,6 +9,8 @@ import { listRoutingCatalog, type Task, type TaskListSummary, type TaskListWithT
 
 const DEFAULT_LIST_ID = process.env.DEFAULT_TASKLIST_ID ?? "@default";
 
+const RFC3339_ZERO_TIME = "T00:00:00.000Z";
+
 type ResolvedListMap = Map<string, string>;
 type Tasklist = { id?: string | null; title?: string | null };
 
@@ -60,7 +62,7 @@ function normalizeDueDate(due?: string | null) {
   const [datePart] = due.split("T");
   if (!datePart) return undefined;
 
-  const normalized = new Date(`${datePart}T00:00:00.000Z`);
+  const normalized = new Date(`${datePart}${RFC3339_ZERO_TIME}`);
   return Number.isNaN(normalized.getTime()) ? undefined : normalized.toISOString();
 }
 
@@ -251,6 +253,21 @@ export async function moveTasksToList(destinationListId: string, tasksToMove: Ta
   return { moved };
 }
 
+export async function reorderTask(tasklistId: string, taskId: string, previousTaskId?: string): Promise<void> {
+  if (!tasklistId || !taskId) {
+    throw new Error("Tasklist ID and task ID are required to reorder tasks");
+  }
+
+  const tasksClient = await getAuthorizedTasksClient();
+  await tasksClient.tasks.move({
+    tasklist: tasklistId,
+    task: taskId,
+    previous: previousTaskId
+  });
+
+  revalidatePath("/");
+}
+
 export async function fetchTasklists(): Promise<TaskListSummary[]> {
   const tasksClient = await getAuthorizedTasksClient();
   const { available } = await resolveTasklists(tasksClient);
@@ -297,6 +314,16 @@ export async function fetchTasklistsWithTasks(listIds?: string[]): Promise<TaskL
   }
 
   return results;
+}
+
+export async function clearCompletedInList(tasklistId: string): Promise<void> {
+  if (!tasklistId) {
+    throw new Error("A tasklist ID is required to clear completed tasks");
+  }
+
+  const tasksClient = await getAuthorizedTasksClient();
+  await tasksClient.tasks.clear({ tasklist: tasklistId });
+  revalidatePath("/");
 }
 
 export async function fetchDefaultTaskSnapshot(limit = 10): Promise<{ tasks: TaskSnapshot[]; error?: string }> {

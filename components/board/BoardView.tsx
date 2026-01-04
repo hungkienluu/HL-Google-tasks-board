@@ -2,8 +2,14 @@
 
 import { useEffect, useMemo, useState, useTransition, type MouseEvent } from "react";
 import clsx from "clsx";
+import { AnimatePresence, motion } from "framer-motion";
 import type { Task, TaskListWithTasks } from "@/lib/tasks/schema";
-import { moveTasksToList } from "@/app/actions/syncEngine";
+import {
+  clearCompletedInList,
+  moveTasksToList,
+  reorderTask,
+  syncDefaultList
+} from "@/app/actions/syncEngine";
 
 const urgencyStyles: Record<Task["urgency"], string> = {
   high: "task-border-high",
@@ -21,14 +27,22 @@ function TaskCard({
   task,
   listTitle,
   isSelected,
+  canMoveDown,
+  isReordering,
   onToggle,
-  onViewDetails
+  onViewDetails,
+  onMoveToTop,
+  onMoveDown
 }: {
   task: Task;
   listTitle: string;
   isSelected: boolean;
+  canMoveDown: boolean;
+  isReordering: boolean;
   onToggle: () => void;
   onViewDetails: () => void;
+  onMoveToTop: () => void;
+  onMoveDown: () => void;
 }) {
   const handleViewDetails = (event: MouseEvent<HTMLButtonElement>) => {
     event.preventDefault();
@@ -37,7 +51,7 @@ function TaskCard({
   };
 
   return (
-    <label className="group relative block">
+    <motion.label layout className="group relative block" initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }}>
       <input
         type="checkbox"
         className="peer absolute left-2 top-2 z-10 h-4 w-4 rounded border border-slate-300 bg-white text-slate-900 shadow-sm accent-slate-900 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-900"
@@ -45,13 +59,43 @@ function TaskCard({
         onChange={onToggle}
         aria-label={`Select task ${task.title}`}
       />
-      <article
+      <motion.article
+        layout
         className={clsx(
           "card-surface border-l-4 p-3 pl-8 transition hover:-translate-y-0.5 peer-checked:ring-2 peer-checked:ring-slate-200 peer-checked:ring-offset-1",
           urgencyStyles[task.urgency]
         )}
+        transition={{ type: "spring", stiffness: 320, damping: 26 }}
       >
-        <h3 className={clsx("text-sm font-semibold", task.urgency === "high" && "text-red-600")}>{task.title}</h3>
+        <div className="flex items-start justify-between gap-3">
+          <h3 className={clsx("text-sm font-semibold leading-tight", task.urgency === "high" && "text-red-600")}>
+            {task.title}
+          </h3>
+          <div className="flex items-center gap-1">
+            <button
+              type="button"
+              onClick={(event) => {
+                event.preventDefault();
+                onMoveToTop();
+              }}
+              disabled={isReordering}
+              className="rounded-md bg-slate-900 px-2 py-1 text-[11px] font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              ↑ Top
+            </button>
+            <button
+              type="button"
+              onClick={(event) => {
+                event.preventDefault();
+                onMoveDown();
+              }}
+              disabled={isReordering || !canMoveDown}
+              className="rounded-md border border-slate-300 px-2 py-1 text-[11px] font-semibold text-slate-800 transition hover:border-slate-400 hover:text-slate-900 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              ↓ Down
+            </button>
+          </div>
+        </div>
         {task.notes ? (
           <p className="mt-1 text-xs text-slate-600 line-clamp-2 whitespace-pre-line">{task.notes}</p>
         ) : null}
@@ -70,25 +114,22 @@ function TaskCard({
             </span>
           </div>
         </div>
-      </article>
-    </label>
+      </motion.article>
+    </motion.label>
   );
 }
 
 export function BoardView({ tasklists }: BoardViewProps) {
-  const [visibleListIds, setVisibleListIds] = useState<string[]>(() => {
-    const nonDefault = tasklists.filter((list) => !list.isDefault).map((list) => list.id);
-    return nonDefault.length > 0 ? nonDefault : tasklists.map((list) => list.id);
-  });
+  const [visibleListIds, setVisibleListIds] = useState<string[]>(() => tasklists.map((list) => list.id));
   const [activeList, setActiveList] = useState<string>(tasklists[0]?.id ?? "");
   const [selectedTaskIds, setSelectedTaskIds] = useState<SelectionState>(new Set());
   const [destinationListId, setDestinationListId] = useState<string>("");
   const [detailTask, setDetailTask] = useState<{ task: Task; listTitle: string } | null>(null);
   const [isPending, startTransition] = useTransition();
+  const [isActionPending, startActionTransition] = useTransition();
 
   useEffect(() => {
-    const defaults = tasklists.filter((list) => !list.isDefault).map((list) => list.id);
-    const fallback = defaults.length > 0 ? defaults : tasklists.map((list) => list.id);
+    const fallback = tasklists.map((list) => list.id);
     setVisibleListIds((current) => {
       if (current.length === 0) return fallback;
       const stillVisible = current.filter((id) => tasklists.some((list) => list.id === id));
@@ -133,9 +174,8 @@ export function BoardView({ tasklists }: BoardViewProps) {
         .map((list) => ({
           key: list.id,
           label: list.title,
-          tasks: [...(list.tasks ?? [])].sort((a, b) =>
-            a.urgency === "high" ? -1 : b.urgency === "high" ? 1 : 0
-          )
+          isDefault: list.isDefault,
+          tasks: [...(list.tasks ?? [])]
         }))
         .filter((column) => visibleListIds.includes(column.key)),
     [tasklists, visibleListIds]
@@ -196,11 +236,81 @@ export function BoardView({ tasklists }: BoardViewProps) {
 
   const clearSelection = () => setSelectedTaskIds(new Set());
 
+  const focusTasks = useMemo(
+    () =>
+      tasklists
+        .flatMap((list) => list.tasks.map((task) => ({ ...task, listTitle: list.title })))
+        .filter((task) => task.status !== "completed" && task.title.includes("🔥")),
+    [tasklists]
+  );
+
+  const handleReorder = (tasklistId: string, taskId: string, previousTaskId?: string) => {
+    startActionTransition(async () => {
+      await reorderTask(tasklistId, taskId, previousTaskId);
+    });
+  };
+
+  const handleClearCompleted = (tasklistId: string) => {
+    startActionTransition(async () => {
+      await clearCompletedInList(tasklistId);
+    });
+  };
+
+  const handleTriageDefault = (tasklistId: string) => {
+    if (!tasklistId) return;
+    startActionTransition(async () => {
+      await syncDefaultList();
+    });
+  };
+
   const hasColumns = columns.length > 0;
+  const activeColumn = useMemo(
+    () => columns.find((column) => column.key === activeList),
+    [activeList, columns]
+  );
   const activeListLabel = columns.find((column) => column.key === activeList)?.label ?? "";
 
   return (
     <div className="flex w-full flex-col gap-4">
+      <div className="card-surface border-slate-200 bg-slate-950 px-4 py-3 text-white shadow-sm">
+        <div className="mb-2 flex items-center justify-between gap-2">
+          <div>
+            <p className="text-[11px] uppercase tracking-[0.2em] text-slate-300">Focus Mode</p>
+            <h2 className="text-xl font-semibold">High-Urgency Tasks</h2>
+          </div>
+          <span className="rounded-full bg-white/10 px-3 py-1 text-xs font-semibold text-slate-100">
+            {focusTasks.length} on fire
+          </span>
+        </div>
+        <div className="flex gap-3 overflow-x-auto pb-1">
+          <AnimatePresence initial={false}>
+            {focusTasks.length > 0 ? (
+              focusTasks.map((task) => (
+                <motion.div
+                  key={`${task.listId}:${task.id}`}
+                  layout
+                  initial={{ opacity: 0, y: 4 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -4 }}
+                  transition={{ duration: 0.18, ease: "easeOut" }}
+                  className="min-w-[240px] rounded-lg bg-white/5 p-3 shadow-inner backdrop-blur"
+                >
+                  <p className="text-xs uppercase tracking-[0.15em] text-slate-300">{task.listTitle}</p>
+                  <p className="mt-1 text-sm font-semibold leading-tight">{task.title}</p>
+                  {task.due ? (
+                    <p className="mt-1 text-[11px] text-amber-200">
+                      Due: {new Date(task.due).toLocaleDateString(undefined, { month: "short", day: "numeric" })}
+                    </p>
+                  ) : null}
+                </motion.div>
+              ))
+            ) : (
+              <div className="text-sm text-slate-200">No 🔥 tasks right now. Add one to spotlight it.</div>
+            )}
+          </AnimatePresence>
+        </div>
+      </div>
+
       <div className="flex flex-wrap gap-2">
         {tasklists.map((list) => (
           <button
@@ -287,7 +397,27 @@ export function BoardView({ tasklists }: BoardViewProps) {
               <div key={column.key} className="flex flex-col gap-3">
                 <div className="flex items-center justify-between gap-3">
                   <h2 className="text-lg font-semibold text-slate-900">{column.label}</h2>
-                  <span className="text-xs text-slate-500">{column.tasks.length} tasks</span>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => handleClearCompleted(column.key)}
+                      disabled={isActionPending}
+                      className="rounded-lg border border-slate-300 px-3 py-1 text-xs font-semibold text-slate-700 transition hover:border-slate-400 hover:text-slate-900 disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      Clear Completed
+                    </button>
+                    {column.isDefault ? (
+                      <button
+                        type="button"
+                        onClick={() => handleTriageDefault(column.key)}
+                        disabled={isActionPending}
+                        className="rounded-lg bg-slate-900 px-3 py-1 text-xs font-semibold text-white shadow-sm transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
+                      >
+                        {isActionPending ? "Triaging..." : "Triage Inbox"}
+                      </button>
+                    ) : null}
+                    <span className="text-xs text-slate-500">{column.tasks.length} tasks</span>
+                  </div>
                 </div>
                 <div className="flex flex-col gap-3">
                   <div className="flex items-center justify-between text-xs text-slate-600">
@@ -304,16 +434,23 @@ export function BoardView({ tasklists }: BoardViewProps) {
                       {column.tasks.filter((task) => selectedTaskIds.has(`${column.key}:${task.id}`)).length} selected
                     </span>
                   </div>
-                  {column.tasks.map((task) => (
-                    <TaskCard
-                      key={task.id}
-                      task={task}
-                      listTitle={column.label}
-                      isSelected={selectedTaskIds.has(`${column.key}:${task.id}`)}
-                      onToggle={() => handleToggleTask(column.key, task.id)}
-                      onViewDetails={() => openTaskDetails(task, column.label)}
-                    />
-                  ))}
+                  {column.tasks.map((task, index) => {
+                    const nextTask = column.tasks[index + 1];
+                    return (
+                      <TaskCard
+                        key={task.id}
+                        task={task}
+                        listTitle={column.label}
+                        isSelected={selectedTaskIds.has(`${column.key}:${task.id}`)}
+                        canMoveDown={!!nextTask}
+                        isReordering={isActionPending}
+                        onToggle={() => handleToggleTask(column.key, task.id)}
+                        onViewDetails={() => openTaskDetails(task, column.label)}
+                        onMoveToTop={() => handleReorder(column.key, task.id, undefined)}
+                        onMoveDown={() => handleReorder(column.key, task.id, nextTask?.id)}
+                      />
+                    );
+                  })}
                 </div>
               </div>
             ))}
@@ -336,18 +473,47 @@ export function BoardView({ tasklists }: BoardViewProps) {
               ))}
             </div>
             <div className="flex flex-col gap-3">
-              {columns
-                .find((column) => column.key === activeList)
-                ?.tasks.map((task) => (
-                  <TaskCard
-                    key={task.id}
-                    task={task}
-                    listTitle={activeListLabel}
-                    isSelected={selectedTaskIds.has(`${activeList}:${task.id}`)}
-                    onToggle={() => handleToggleTask(activeList, task.id)}
-                    onViewDetails={() => openTaskDetails(task, activeListLabel)}
-                  />
-                ))}
+              {activeColumn ? (
+                <>
+                  <div className="flex items-center justify-between text-xs text-slate-600">
+                    <button
+                      type="button"
+                      onClick={() => handleClearCompleted(activeColumn.key)}
+                      disabled={isActionPending}
+                      className="rounded-lg border border-slate-300 px-3 py-1 font-semibold text-slate-700 transition hover:border-slate-400 hover:text-slate-900 disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      Clear Completed
+                    </button>
+                    {activeColumn.isDefault ? (
+                      <button
+                        type="button"
+                        onClick={() => handleTriageDefault(activeList)}
+                        disabled={isActionPending}
+                        className="rounded-lg bg-slate-900 px-3 py-1 font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
+                      >
+                        {isActionPending ? "Triaging..." : "Triage Inbox"}
+                      </button>
+                    ) : null}
+                  </div>
+                  {activeColumn.tasks.map((task, index, arr) => {
+                    const nextTask = arr[index + 1];
+                    return (
+                      <TaskCard
+                        key={task.id}
+                        task={task}
+                        listTitle={activeListLabel}
+                        isSelected={selectedTaskIds.has(`${activeList}:${task.id}`)}
+                        canMoveDown={!!nextTask}
+                        isReordering={isActionPending}
+                        onToggle={() => handleToggleTask(activeList, task.id)}
+                        onViewDetails={() => openTaskDetails(task, activeListLabel)}
+                        onMoveToTop={() => handleReorder(activeList, task.id, undefined)}
+                        onMoveDown={() => handleReorder(activeList, task.id, nextTask?.id)}
+                      />
+                    );
+                  })}
+                </>
+              ) : null}
             </div>
           </div>
         </>

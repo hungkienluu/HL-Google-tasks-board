@@ -1,14 +1,28 @@
 "use client";
 
 import {
+  forwardRef,
   useEffect,
   useMemo,
   useState,
   useTransition,
-  type DragEvent,
+  type CSSProperties,
   type MouseEvent,
-  type TouchEvent
+  type PointerEvent
 } from "react";
+import {
+  DndContext,
+  DragOverlay,
+  PointerSensor,
+  type DraggableAttributes,
+  type DragEndEvent,
+  type DragStartEvent,
+  useSensor,
+  useSensors
+} from "@dnd-kit/core";
+import { restrictToVerticalAxis, restrictToWindowEdges } from "@dnd-kit/modifiers";
+import { SortableContext, arrayMove, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
 import clsx from "clsx";
 import { AnimatePresence, motion } from "framer-motion";
 import type { Task, TaskListWithTasks } from "@/lib/tasks/schema";
@@ -30,133 +44,132 @@ type BoardViewProps = {
 };
 
 type SelectionState = Set<string>;
-type DragState = { listId: string; taskId: string } | null;
+type SortableTaskMeta = { task: Task; listId: string };
+type ActiveDragTask = { task: Task; listTitle: string; listId: string } | null;
+type ViewKey = "desktop" | "mobile";
 
-function TaskCard({
-  task,
-  listId,
-  listTitle,
-  isSelected,
-  isReordering,
-  isDragging,
-  isDropTarget,
-  onToggle,
-  onViewDetails,
-  onDragStart,
-  onDragEnd,
-  onDragOver,
-  onDrop,
-  onDragLeave,
-  onTouchStart,
-  onTouchMove,
-  onTouchEnd
-}: {
+type TaskCardProps = {
   task: Task;
-  listId: string;
   listTitle: string;
   isSelected: boolean;
-  isReordering: boolean;
-  isDragging: boolean;
-  isDropTarget: boolean;
+  isDragging?: boolean;
+  isDropTarget?: boolean;
+  dragOverlay?: boolean;
   onToggle: () => void;
   onViewDetails: () => void;
-  onDragStart: () => void;
-  onDragEnd: () => void;
-  onDragOver: (event: DragEvent<HTMLElement>) => void;
-  onDrop: (event: DragEvent<HTMLElement>) => void;
-  onDragLeave: () => void;
-  onTouchStart: (event: TouchEvent<HTMLElement>) => void;
-  onTouchMove: (event: TouchEvent<HTMLElement>) => void;
-  onTouchEnd: () => void;
-}) {
+  handleProps?: DraggableAttributes & Record<string, unknown>;
+  style?: CSSProperties;
+};
+
+const TaskCard = forwardRef<HTMLDivElement, TaskCardProps>(function TaskCard(
+  {
+    task,
+    listTitle,
+    isSelected,
+    isDragging = false,
+    isDropTarget = false,
+    dragOverlay = false,
+    onToggle,
+    onViewDetails,
+    handleProps,
+    style
+  },
+  ref
+) {
   const handleViewDetails = (event: MouseEvent<HTMLButtonElement>) => {
     event.preventDefault();
     event.stopPropagation();
     onViewDetails();
   };
-  const handleDragStart = (event: DragEvent<HTMLElement>) => {
-    event.dataTransfer.effectAllowed = "move";
-    onDragStart();
+
+  const handlePointerStop = (event: PointerEvent<HTMLElement>) => {
+    event.stopPropagation();
   };
 
   return (
-    <motion.label
+    <motion.div
       layout
-      className="group relative block"
+      ref={ref}
+      style={style}
+      className={clsx("group relative block", dragOverlay && "scale-[1.02]")}
       initial={{ opacity: 0, y: 6 }}
       animate={{ opacity: 1, y: 0 }}
-      draggable={!isReordering}
-      onDragStartCapture={handleDragStart}
-      onDragEnd={onDragEnd}
-      onDragOver={(event) => {
-        event.preventDefault();
-        onDragOver(event);
-      }}
-      onDrop={(event) => {
-        event.preventDefault();
-        onDrop(event);
-      }}
-      onDragLeave={onDragLeave}
-      onTouchStart={onTouchStart}
-      onTouchMove={onTouchMove}
-      onTouchEnd={onTouchEnd}
-      onTouchCancel={onTouchEnd}
-      aria-grabbed={isDragging}
-      data-task-id={task.id}
-      data-list-id={listId}
     >
-      <input
-        type="checkbox"
-        className="peer absolute left-2 top-2 z-10 h-4 w-4 rounded border border-slate-300 bg-white text-slate-900 shadow-sm accent-slate-900 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-900"
-        checked={isSelected}
-        onChange={onToggle}
-        aria-label={`Select task ${task.title}`}
-      />
       <motion.article
         layout
         className={clsx(
-          "card-surface border-l-4 p-3 pl-8 transition hover:-translate-y-0.5 peer-checked:ring-2 peer-checked:ring-slate-200 peer-checked:ring-offset-1",
+          "card-surface border-l-4 p-3 transition hover:-translate-y-0.5",
           urgencyStyles[task.urgency],
+          isSelected && "ring-2 ring-slate-200",
           isDragging && "ring-2 ring-slate-900 ring-offset-2",
-          isDropTarget && "outline outline-2 outline-offset-2 outline-slate-900"
+          isDropTarget && "outline outline-2 outline-offset-2 outline-slate-900",
+          dragOverlay && "shadow-xl ring-2 ring-slate-900 ring-offset-2"
         )}
         transition={{ type: "spring", stiffness: 320, damping: 26 }}
       >
-        <div className="flex items-start justify-between gap-3">
-          <h3 className={clsx("text-sm font-semibold leading-tight", task.urgency === "high" && "text-red-600")}>
-            {task.title}
-          </h3>
-          <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-wide text-slate-500">
-            <span className="hidden text-slate-600 sm:inline">Drag to reorder</span>
-            <span aria-hidden className="select-none rounded-md border border-slate-200 px-2 py-1 text-slate-700">
-              ⋮⋮
-            </span>
-          </div>
-        </div>
-        {task.notes ? (
-          <p className="mt-1 text-xs text-slate-600 line-clamp-2 whitespace-pre-line">{task.notes}</p>
-        ) : null}
-        <div className="mt-2 flex items-center justify-between text-[11px] uppercase tracking-wide text-slate-500">
-          <span>{task.urgency === "high" ? "🔥 This Week" : task.urgency === "medium" ? "Next" : "Later"}</span>
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={handleViewDetails}
-              className="rounded-full border border-slate-200 px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-slate-700 transition hover:border-slate-300 hover:bg-slate-50"
-            >
-              View details
-            </button>
-            <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-slate-700">
-              {listTitle}
-            </span>
+        <div className="flex items-start gap-3">
+          <button
+            type="button"
+            aria-label={`Reorder ${task.title}`}
+            data-dnd-handle
+            className="mt-1 flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-slate-200 bg-white text-slate-600 transition hover:border-slate-300 hover:text-slate-900 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-900"
+            {...(handleProps ?? {})}
+          >
+            <span aria-hidden className="text-lg leading-none">⋮⋮</span>
+          </button>
+
+          <div className="flex-1 space-y-2">
+            <div className="flex items-start justify-between gap-3">
+              <div className="flex items-start gap-2">
+                <input
+                  type="checkbox"
+                  data-no-dnd
+                  className="mt-0.5 h-4 w-4 rounded border border-slate-300 bg-white text-slate-900 shadow-sm accent-slate-900 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-900"
+                  checked={isSelected}
+                  onChange={onToggle}
+                  onPointerDown={handlePointerStop}
+                  aria-label={`Select task ${task.title}`}
+                />
+                <div>
+                  <h3 className={clsx("text-sm font-semibold leading-tight", task.urgency === "high" && "text-red-600")}>
+                    {task.title}
+                  </h3>
+                  {task.notes ? (
+                    <p className="mt-1 text-xs text-slate-600 line-clamp-2 whitespace-pre-line">{task.notes}</p>
+                  ) : null}
+                </div>
+              </div>
+              <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                <span className="hidden text-slate-600 sm:inline">Drag to reorder</span>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-between text-[11px] uppercase tracking-wide text-slate-500">
+              <span>{task.urgency === "high" ? "🔥 This Week" : task.urgency === "medium" ? "Next" : "Later"}</span>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  data-no-dnd
+                  onPointerDown={handlePointerStop}
+                  onClick={handleViewDetails}
+                  className="rounded-full border border-slate-200 px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-slate-700 transition hover:border-slate-300 hover:bg-slate-50"
+                >
+                  View details
+                </button>
+                <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-slate-700">
+                  {listTitle}
+                </span>
+              </div>
+            </div>
           </div>
         </div>
       </motion.article>
-    </motion.label>
+    </motion.div>
   );
-}
+});
 
 export function BoardView({ tasklists }: BoardViewProps) {
+  const [tasklistsState, setTasklistsState] = useState<TaskListWithTasks[]>(tasklists);
   const [visibleListIds, setVisibleListIds] = useState<string[]>(() => tasklists.map((list) => list.id));
   const [activeList, setActiveList] = useState<string>(tasklists[0]?.id ?? "");
   const [selectedTaskIds, setSelectedTaskIds] = useState<SelectionState>(new Set());
@@ -164,37 +177,48 @@ export function BoardView({ tasklists }: BoardViewProps) {
   const [detailTask, setDetailTask] = useState<{ task: Task; listTitle: string } | null>(null);
   const [isPending, startTransition] = useTransition();
   const [isActionPending, startActionTransition] = useTransition();
-  const [draggingTask, setDraggingTask] = useState<DragState>(null);
-  const [dragOverTaskId, setDragOverTaskId] = useState<string | null>(null);
+  const [activeDragTask, setActiveDragTask] = useState<ActiveDragTask>(null);
+
+  const sensors = useSensors(
+    useSensor(PointerSensor, {
+      activationConstraint: {
+        distance: 6
+      }
+    })
+  );
 
   useEffect(() => {
-    const fallback = tasklists.map((list) => list.id);
-    setVisibleListIds((current) => {
-      if (current.length === 0) return fallback;
-      const stillVisible = current.filter((id) => tasklists.some((list) => list.id === id));
-      return stillVisible.length > 0 ? stillVisible : fallback;
-    });
+    setTasklistsState(tasklists);
   }, [tasklists]);
 
   useEffect(() => {
-    const firstVisible = visibleListIds.find((id) => tasklists.some((list) => list.id === id));
+    const fallback = tasklistsState.map((list) => list.id);
+    setVisibleListIds((current) => {
+      if (current.length === 0) return fallback;
+      const stillVisible = current.filter((id) => tasklistsState.some((list) => list.id === id));
+      return stillVisible.length > 0 ? stillVisible : fallback;
+    });
+  }, [tasklistsState]);
+
+  useEffect(() => {
+    const firstVisible = visibleListIds.find((id) => tasklistsState.some((list) => list.id === id));
     if (firstVisible) {
       setActiveList(firstVisible);
     }
-  }, [visibleListIds, tasklists]);
+  }, [visibleListIds, tasklistsState]);
 
   useEffect(() => {
     const selectionListIds = Array.from(selectedTaskIds).map((key) => key.split(":")[0]);
     const uniqueListIds = Array.from(new Set(selectionListIds));
-    const firstDifferentList = tasklists.find((list) => list.id !== uniqueListIds[0]);
+    const firstDifferentList = tasklistsState.find((list) => list.id !== uniqueListIds[0]);
     if (!destinationListId && firstDifferentList) {
       setDestinationListId(firstDifferentList.id);
     }
     if (destinationListId && selectionListIds.length > 0 && uniqueListIds.includes(destinationListId)) {
-      const alternative = tasklists.find((list) => list.id !== uniqueListIds[0]);
+      const alternative = tasklistsState.find((list) => list.id !== uniqueListIds[0]);
       if (alternative) setDestinationListId(alternative.id);
     }
-  }, [destinationListId, selectedTaskIds, tasklists]);
+  }, [destinationListId, selectedTaskIds, tasklistsState]);
 
   const toggleList = (id: string) => {
     setVisibleListIds((current) => {
@@ -209,7 +233,7 @@ export function BoardView({ tasklists }: BoardViewProps) {
 
   const columns = useMemo(
     () =>
-      tasklists
+      tasklistsState
         .map((list) => ({
           key: list.id,
           label: list.title,
@@ -217,15 +241,15 @@ export function BoardView({ tasklists }: BoardViewProps) {
           tasks: [...(list.tasks ?? [])]
         }))
         .filter((column) => visibleListIds.includes(column.key)),
-    [tasklists, visibleListIds]
+    [tasklistsState, visibleListIds]
   );
 
   const selectedTasks = useMemo(
     () =>
-      tasklists
-        .flatMap((list) => list.tasks.map((task) => ({ ...task, listId: list.id })))
+      tasklistsState
+        .flatMap((list) => (list.tasks ?? []).map((task) => ({ ...task, listId: list.id })))
         .filter((task) => selectedTaskIds.has(`${task.listId}:${task.id}`)),
-    [selectedTaskIds, tasklists]
+    [selectedTaskIds, tasklistsState]
   );
 
   const selectedListIds = useMemo(
@@ -277,79 +301,107 @@ export function BoardView({ tasklists }: BoardViewProps) {
 
   const focusTasks = useMemo(
     () =>
-      tasklists
-        .flatMap((list) => list.tasks.map((task) => ({ ...task, listTitle: list.title })))
+      tasklistsState
+        .flatMap((list) => (list.tasks ?? []).map((task) => ({ ...task, listTitle: list.title })))
         .filter((task) => task.status !== "completed" && task.title.includes("🔥")),
-    [tasklists]
+    [tasklistsState]
   );
 
-  const handleReorder = (tasklistId: string, taskId: string, previousTaskId?: string) => {
-    startActionTransition(async () => {
-      await reorderTask(tasklistId, taskId, previousTaskId);
-    });
+  const toSortableId = (view: ViewKey, listId: string, taskId: string) => `${view}:${listId}:${taskId}`;
+
+  const handleDragStart = ({ active }: DragStartEvent) => {
+    const data = active.data.current as SortableTaskMeta | undefined;
+    if (!data) return;
+    const listTitle = tasklistsState.find((list) => list.id === data.listId)?.title ?? "";
+    setActiveDragTask({ task: data.task, listId: data.listId, listTitle });
   };
 
-  const beginDrag = (listId: string, taskId: string) => {
-    if (isActionPending) return;
-    setDraggingTask({ listId, taskId });
-  };
+  const handleDragEnd = ({ active, over }: DragEndEvent) => {
+    if (!over) {
+      setActiveDragTask(null);
+      return;
+    }
 
-  const endDrag = () => {
-    setDraggingTask(null);
-    setDragOverTaskId(null);
-  };
+    const activeData = active.data.current as SortableTaskMeta | undefined;
+    const overData = over.data.current as SortableTaskMeta | undefined;
 
-  const moveBeforeTask = (listId: string, targetTaskId: string, tasks: Task[]) => {
-    if (!draggingTask || draggingTask.listId !== listId || draggingTask.taskId === targetTaskId) return;
-    const withoutDragged = tasks.filter((task) => task.id !== draggingTask.taskId);
-    const targetIndex = withoutDragged.findIndex((task) => task.id === targetTaskId);
-    const previousTask = withoutDragged[targetIndex - 1];
-    handleReorder(listId, draggingTask.taskId, previousTask?.id);
-  };
+    if (!activeData || !overData || activeData.listId !== overData.listId) {
+      setActiveDragTask(null);
+      return;
+    }
 
-  const moveToListEnd = (listId: string, tasks: Task[]) => {
-    if (!draggingTask || draggingTask.listId !== listId) return;
-    const withoutDragged = tasks.filter((task) => task.id !== draggingTask.taskId);
-    const lastTask = withoutDragged[withoutDragged.length - 1];
-    handleReorder(listId, draggingTask.taskId, lastTask?.id);
-  };
+    if (active.id !== over.id) {
+      const listId = activeData.listId;
+      let previousTaskId: string | undefined;
+      let shouldPersist = false;
+      setTasklistsState((current) =>
+        current.map((list) => {
+          if (list.id !== listId) return list;
+          const tasks = list.tasks ?? [];
+          const oldIndex = tasks.findIndex((task) => task.id === activeData.task.id);
+          const newIndex = tasks.findIndex((task) => task.id === overData.task.id);
+          if (oldIndex === -1 || newIndex === -1 || oldIndex === newIndex) return list;
+          const reordered = arrayMove(tasks, oldIndex, newIndex);
+          previousTaskId = reordered[newIndex - 1]?.id;
+          shouldPersist = true;
+          return { ...list, tasks: reordered };
+        })
+      );
 
-  const findTouchTarget = (touchEvent: TouchEvent<HTMLElement>) => {
-    const touch = touchEvent.touches[0];
-    if (!touch) return null;
-    const target = document.elementFromPoint(touch.clientX, touch.clientY);
-    if (!target) return null;
-    const card = target.closest("[data-task-id]") as HTMLElement | null;
-    if (!card) return null;
-    const taskId = card.dataset.taskId;
-    const listId = card.dataset.listId;
-    if (!taskId || !listId) return null;
-    return { taskId, listId };
-  };
-
-  const handleTouchStart = (listId: string, taskId: string) => {
-    beginDrag(listId, taskId);
-  };
-
-  const handleTouchMove =
-    (listId: string, tasks: Task[]) => (event: TouchEvent<HTMLElement>) => {
-      if (!draggingTask || draggingTask.listId !== listId) return;
-      const target = findTouchTarget(event);
-      if (!target || target.listId !== listId) {
-        setDragOverTaskId(null);
-        return;
+      if (shouldPersist) {
+        startActionTransition(async () => {
+          await reorderTask(listId, activeData.task.id, previousTaskId);
+        });
       }
-      event.preventDefault();
-      setDragOverTaskId(target.taskId);
-      moveBeforeTask(listId, target.taskId, tasks);
+    }
+
+    setActiveDragTask(null);
+  };
+
+  const handleDragCancel = () => setActiveDragTask(null);
+
+  const SortableTaskCard = ({
+    view,
+    task,
+    listId,
+    listTitle,
+    isSelected,
+    onToggle,
+    onViewDetails
+  }: {
+    view: ViewKey;
+    task: Task;
+    listId: string;
+    listTitle: string;
+    isSelected: boolean;
+    onToggle: () => void;
+    onViewDetails: () => void;
+  }) => {
+    const { attributes, listeners, setNodeRef, transform, transition, isDragging, isOver } = useSortable({
+      id: toSortableId(view, listId, task.id),
+      data: { task, listId },
+      disabled: isActionPending
+    });
+
+    const style: CSSProperties = {
+      transform: transform ? CSS.Transform.toString(transform) : undefined,
+      transition
     };
 
-  const handleTouchEnd = (listId: string, tasks: Task[]) => () => {
-    if (!draggingTask || draggingTask.listId !== listId) return;
-    if (dragOverTaskId === null) {
-      moveToListEnd(listId, tasks);
-    }
-    endDrag();
+    return (
+      <TaskCard
+        ref={setNodeRef}
+        task={task}
+        listTitle={listTitle}
+        isSelected={isSelected}
+        isDragging={isDragging}
+        isDropTarget={isOver}
+        onToggle={onToggle}
+        onViewDetails={onViewDetails}
+        handleProps={{ ...attributes, ...listeners }}
+        style={style}
+      />
+    );
   };
 
   const handleClearCompleted = (tasklistId: string) => {
@@ -414,7 +466,7 @@ export function BoardView({ tasklists }: BoardViewProps) {
       </div>
 
       <div className="flex flex-wrap gap-2">
-        {tasklists.map((list) => (
+        {tasklistsState.map((list) => (
           <button
             key={list.id}
             type="button"
@@ -432,7 +484,13 @@ export function BoardView({ tasklists }: BoardViewProps) {
       </div>
 
       {hasColumns ? (
-        <>
+        <DndContext
+          sensors={sensors}
+          onDragStart={handleDragStart}
+          onDragEnd={handleDragEnd}
+          onDragCancel={handleDragCancel}
+          modifiers={[restrictToVerticalAxis, restrictToWindowEdges]}
+        >
           <div
             className={clsx(
               "card-surface flex flex-col gap-3 border-slate-200 p-4 text-sm shadow-none md:flex-row md:items-center md:justify-between",
@@ -445,7 +503,7 @@ export function BoardView({ tasklists }: BoardViewProps) {
               </span>
               {singleSourceListId ? (
                 <span className="text-xs text-slate-600">
-                  Moving from <strong>{tasklists.find((list) => list.id === singleSourceListId)?.title}</strong>
+                  Moving from <strong>{tasklistsState.find((list) => list.id === singleSourceListId)?.title}</strong>
                 </span>
               ) : selectedTasks.length > 0 ? (
                 <span className="text-xs text-amber-600">
@@ -465,7 +523,7 @@ export function BoardView({ tasklists }: BoardViewProps) {
                 <option value="" disabled>
                   Choose destination
                 </option>
-                {tasklists
+                {tasklistsState
                   .filter((list) => list.id !== singleSourceListId)
                   .map((list) => (
                     <option key={list.id} value={list.id}>
@@ -496,7 +554,7 @@ export function BoardView({ tasklists }: BoardViewProps) {
 
           <div className="hidden gap-4 md:grid md:grid-cols-2 xl:grid-cols-4">
             {columns.map((column) => (
-              <div key={column.key} className="flex flex-col gap-3">
+              <div key={`desktop-${column.key}`} className="flex flex-col gap-3">
                 <div className="flex items-center justify-between gap-3">
                   <h2 className="text-lg font-semibold text-slate-900">{column.label}</h2>
                   <div className="flex items-center gap-2">
@@ -536,58 +594,23 @@ export function BoardView({ tasklists }: BoardViewProps) {
                       {column.tasks.filter((task) => selectedTaskIds.has(`${column.key}:${task.id}`)).length} selected
                     </span>
                   </div>
-                  {column.tasks.map((task) => {
-                    const isDropTarget = dragOverTaskId === task.id && draggingTask?.listId === column.key;
-                    return (
-                      <TaskCard
-                        key={task.id}
+                  <SortableContext
+                    items={column.tasks.map((task) => toSortableId("desktop", column.key, task.id))}
+                    strategy={verticalListSortingStrategy}
+                  >
+                    {column.tasks.map((task) => (
+                      <SortableTaskCard
+                        key={toSortableId("desktop", column.key, task.id)}
+                        view="desktop"
                         task={task}
                         listId={column.key}
                         listTitle={column.label}
                         isSelected={selectedTaskIds.has(`${column.key}:${task.id}`)}
-                        isReordering={isActionPending}
-                        isDragging={draggingTask?.taskId === task.id}
-                        isDropTarget={isDropTarget}
                         onToggle={() => handleToggleTask(column.key, task.id)}
                         onViewDetails={() => openTaskDetails(task, column.label)}
-                        onDragStart={() => beginDrag(column.key, task.id)}
-                        onDragEnd={endDrag}
-                        onDragOver={() => {
-                          if (draggingTask?.listId !== column.key) return;
-                          setDragOverTaskId(task.id);
-                        }}
-                        onDrop={() => {
-                          moveBeforeTask(column.key, task.id, column.tasks);
-                          endDrag();
-                        }}
-                        onDragLeave={() => {
-                          if (dragOverTaskId === task.id) setDragOverTaskId(null);
-                        }}
-                        onTouchStart={() => handleTouchStart(column.key, task.id)}
-                        onTouchMove={handleTouchMove(column.key, column.tasks)}
-                        onTouchEnd={handleTouchEnd(column.key, column.tasks)}
                       />
-                    );
-                  })}
-                  {draggingTask?.listId === column.key ? (
-                    <div
-                      className={clsx(
-                        "rounded-lg border border-dashed border-slate-300 px-3 py-2 text-center text-xs text-slate-500 transition",
-                        dragOverTaskId === null && "bg-slate-50"
-                      )}
-                      onDragOver={(event) => {
-                        event.preventDefault();
-                        setDragOverTaskId(null);
-                      }}
-                      onDrop={(event) => {
-                        event.preventDefault();
-                        moveToListEnd(column.key, column.tasks);
-                        endDrag();
-                      }}
-                    >
-                      Drop here to place at end
-                    </div>
-                  ) : null}
+                    ))}
+                  </SortableContext>
                 </div>
               </div>
             ))}
@@ -632,63 +655,41 @@ export function BoardView({ tasklists }: BoardViewProps) {
                       </button>
                     ) : null}
                   </div>
-                  {activeColumn.tasks.map((task) => {
-                    const isDropTarget = dragOverTaskId === task.id && draggingTask?.listId === activeColumn.key;
-                    return (
-                      <TaskCard
-                        key={task.id}
+                  <SortableContext
+                    items={activeColumn.tasks.map((task) => toSortableId("mobile", activeColumn.key, task.id))}
+                    strategy={verticalListSortingStrategy}
+                  >
+                    {activeColumn.tasks.map((task) => (
+                      <SortableTaskCard
+                        key={toSortableId("mobile", activeColumn.key, task.id)}
+                        view="mobile"
                         task={task}
                         listId={activeColumn.key}
                         listTitle={activeListLabel}
                         isSelected={selectedTaskIds.has(`${activeList}:${task.id}`)}
-                        isReordering={isActionPending}
-                        isDragging={draggingTask?.taskId === task.id}
-                        isDropTarget={isDropTarget}
                         onToggle={() => handleToggleTask(activeList, task.id)}
                         onViewDetails={() => openTaskDetails(task, activeListLabel)}
-                        onDragStart={() => beginDrag(activeList, task.id)}
-                        onDragEnd={endDrag}
-                        onDragOver={() => {
-                          if (draggingTask?.listId !== activeList) return;
-                          setDragOverTaskId(task.id);
-                        }}
-                        onDrop={() => {
-                          moveBeforeTask(activeList, task.id, activeColumn.tasks);
-                          endDrag();
-                        }}
-                        onDragLeave={() => {
-                          if (dragOverTaskId === task.id) setDragOverTaskId(null);
-                        }}
-                        onTouchStart={() => handleTouchStart(activeList, task.id)}
-                        onTouchMove={handleTouchMove(activeList, activeColumn.tasks)}
-                        onTouchEnd={handleTouchEnd(activeList, activeColumn.tasks)}
                       />
-                    );
-                  })}
-                  {draggingTask?.listId === activeColumn.key ? (
-                    <div
-                      className={clsx(
-                        "rounded-lg border border-dashed border-slate-300 px-3 py-2 text-center text-xs text-slate-500 transition",
-                        dragOverTaskId === null && "bg-slate-50"
-                      )}
-                      onDragOver={(event) => {
-                        event.preventDefault();
-                        setDragOverTaskId(null);
-                      }}
-                      onDrop={(event) => {
-                        event.preventDefault();
-                        moveToListEnd(activeColumn.key, activeColumn.tasks);
-                        endDrag();
-                      }}
-                    >
-                      Drop here to place at end
-                    </div>
-                  ) : null}
+                    ))}
+                  </SortableContext>
                 </>
               ) : null}
             </div>
           </div>
-        </>
+
+          <DragOverlay>
+            {activeDragTask ? (
+              <TaskCard
+                task={activeDragTask.task}
+                listTitle={activeDragTask.listTitle}
+                isSelected={selectedTaskIds.has(`${activeDragTask.listId}:${activeDragTask.task.id}`)}
+                dragOverlay
+                onToggle={() => handleToggleTask(activeDragTask.listId, activeDragTask.task.id)}
+                onViewDetails={() => openTaskDetails(activeDragTask.task, activeDragTask.listTitle)}
+              />
+            ) : null}
+          </DragOverlay>
+        </DndContext>
       ) : (
         <p className="text-sm text-slate-600">No lists selected. Choose at least one list to view tasks.</p>
       )}

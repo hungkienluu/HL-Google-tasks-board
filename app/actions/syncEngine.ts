@@ -143,6 +143,40 @@ export async function quickAddTask(title: string, notes?: string, listKey?: stri
   revalidatePath("/");
 }
 
+export async function moveTasksToList(destinationListId: string, tasksToMove: Task[]): Promise<{ moved: number }> {
+  if (!destinationListId) {
+    throw new Error("Destination list is required");
+  }
+
+  const tasksClient = await getAuthorizedTasksClient();
+  let moved = 0;
+
+  for (const task of tasksToMove) {
+    if (!task.id || !task.title || !task.listId) continue;
+
+    await tasksClient.tasks.insert({
+      tasklist: destinationListId,
+      requestBody: {
+        title: task.title,
+        notes: task.notes,
+        status: task.status,
+        due: task.due,
+        completed: task.status === "completed" ? new Date().toISOString() : undefined
+      }
+    });
+
+    await tasksClient.tasks.delete({
+      tasklist: task.listId,
+      task: task.id
+    });
+
+    moved += 1;
+  }
+
+  revalidatePath("/");
+  return { moved };
+}
+
 export async function fetchTasklists(): Promise<TaskListSummary[]> {
   const tasksClient = await getAuthorizedTasksClient();
   const { available } = await resolveTasklists(tasksClient);

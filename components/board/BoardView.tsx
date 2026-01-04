@@ -208,6 +208,17 @@ export function BoardView({ tasklists }: BoardViewProps) {
   }, [visibleListIds, tasklistsState]);
 
   useEffect(() => {
+    if (!activeDragTask) return;
+
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+
+    return () => {
+      document.body.style.overflow = previousOverflow;
+    };
+  }, [activeDragTask]);
+
+  useEffect(() => {
     const selectionListIds = Array.from(selectedTaskIds).map((key) => key.split(":")[0]);
     const uniqueListIds = Array.from(new Set(selectionListIds));
     const firstDifferentList = tasklistsState.find((list) => list.id !== uniqueListIds[0]);
@@ -395,7 +406,7 @@ export function BoardView({ tasklists }: BoardViewProps) {
         {shouldShowDropIndicator ? (
           <motion.div
             layout
-            className="h-3 rounded-md border-2 border-dashed border-slate-300 bg-white shadow-[inset_0_1px_0_rgba(0,0,0,0.04)]"
+            className="h-4 rounded-md border-2 border-dashed border-slate-300 bg-white shadow-[inset_0_1px_0_rgba(0,0,0,0.04)]"
             transition={{ type: "spring", stiffness: 300, damping: 26 }}
             aria-hidden
           />

@@ -21,6 +21,13 @@ function normalizeDueDate(due?: string | null) {
   return Number.isNaN(normalized.getTime()) ? undefined : normalized.toISOString();
 }
 
+function normalizeCompletedTimestamp(completed?: string | null) {
+  if (!completed) return new Date().toISOString();
+
+  const parsed = new Date(completed);
+  return Number.isNaN(parsed.getTime()) ? new Date().toISOString() : parsed.toISOString();
+}
+
 async function resolveTasklists(tasksClient: Awaited<ReturnType<typeof getAuthorizedTasksClient>>) {
   const tasklistsResponse = await tasksClient.tasklists.list();
   const available = tasklistsResponse.data.items ?? [];
@@ -95,23 +102,28 @@ export async function syncDefaultList(): Promise<{ moved: number; inspected: num
 
     const notes = [task.notes ?? "", describeIntent(intent)].filter(Boolean).join("\n");
 
-    await tasksClient.tasks.insert({
-      tasklist: destinationListId,
-      requestBody: {
-        title: task.title,
-        notes,
-        status: task.status,
-        due: normalizeDueDate(task.due),
-        completed: task.status === "completed" ? task.completed ?? new Date().toISOString() : undefined
-      }
-    });
+    try {
+      await tasksClient.tasks.insert({
+        tasklist: destinationListId,
+        requestBody: {
+          title: task.title,
+          notes,
+          status: task.status,
+          due: normalizeDueDate(task.due),
+          completed: task.status === "completed" ? normalizeCompletedTimestamp(task.completed) : undefined
+        }
+      });
 
-    await tasksClient.tasks.delete({
-      tasklist: defaultListId,
-      task: task.id
-    });
+      await tasksClient.tasks.delete({
+        tasklist: defaultListId,
+        task: task.id
+      });
 
-    moved += 1;
+      moved += 1;
+    } catch (error) {
+      console.error(`Failed to move task '${task.title}' to list ${destinationListId}`, error);
+      continue;
+    }
   }
 
   revalidatePath("/");

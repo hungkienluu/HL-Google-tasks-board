@@ -14,7 +14,7 @@ type ResolvedListMap = Map<string, string>;
 async function resolveTasklists(tasksClient: Awaited<ReturnType<typeof getAuthorizedTasksClient>>) {
   const tasklistsResponse = await tasksClient.tasklists.list();
   const available = tasklistsResponse.data.items ?? [];
-  const normalizedTitle = (value?: string) => value?.trim().toLowerCase();
+  const normalizedTitle = (value?: string | null) => value?.trim().toLowerCase();
 
   const resolved: ResolvedListMap = new Map();
   for (const rule of listRoutingCatalog) {

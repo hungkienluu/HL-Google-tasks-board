@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState, useTransition, type MouseEvent } from "react";
+import { useEffect, useMemo, useState, useTransition, type DragEvent, type MouseEvent } from "react";
 import clsx from "clsx";
 import { AnimatePresence, motion } from "framer-motion";
 import type { Task, TaskListWithTasks } from "@/lib/tasks/schema";
@@ -22,27 +22,36 @@ type BoardViewProps = {
 };
 
 type SelectionState = Set<string>;
+type DragState = { listId: string; taskId: string } | null;
 
 function TaskCard({
   task,
   listTitle,
   isSelected,
-  canMoveDown,
   isReordering,
+  isDragging,
+  isDropTarget,
   onToggle,
   onViewDetails,
-  onMoveToTop,
-  onMoveDown
+  onDragStart,
+  onDragEnd,
+  onDragOver,
+  onDrop,
+  onDragLeave
 }: {
   task: Task;
   listTitle: string;
   isSelected: boolean;
-  canMoveDown: boolean;
   isReordering: boolean;
+  isDragging: boolean;
+  isDropTarget: boolean;
   onToggle: () => void;
   onViewDetails: () => void;
-  onMoveToTop: () => void;
-  onMoveDown: () => void;
+  onDragStart: () => void;
+  onDragEnd: () => void;
+  onDragOver: (event: DragEvent<HTMLElement>) => void;
+  onDrop: (event: DragEvent<HTMLElement>) => void;
+  onDragLeave: () => void;
 }) {
   const handleViewDetails = (event: MouseEvent<HTMLButtonElement>) => {
     event.preventDefault();
@@ -51,7 +60,28 @@ function TaskCard({
   };
 
   return (
-    <motion.label layout className="group relative block" initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }}>
+    <motion.label
+      layout
+      className="group relative block"
+      initial={{ opacity: 0, y: 6 }}
+      animate={{ opacity: 1, y: 0 }}
+      draggable={!isReordering}
+      onDragStart={(event) => {
+        event.dataTransfer.effectAllowed = "move";
+        onDragStart();
+      }}
+      onDragEnd={onDragEnd}
+      onDragOver={(event) => {
+        event.preventDefault();
+        onDragOver(event);
+      }}
+      onDrop={(event) => {
+        event.preventDefault();
+        onDrop(event);
+      }}
+      onDragLeave={onDragLeave}
+      aria-grabbed={isDragging}
+    >
       <input
         type="checkbox"
         className="peer absolute left-2 top-2 z-10 h-4 w-4 rounded border border-slate-300 bg-white text-slate-900 shadow-sm accent-slate-900 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-900"
@@ -63,7 +93,9 @@ function TaskCard({
         layout
         className={clsx(
           "card-surface border-l-4 p-3 pl-8 transition hover:-translate-y-0.5 peer-checked:ring-2 peer-checked:ring-slate-200 peer-checked:ring-offset-1",
-          urgencyStyles[task.urgency]
+          urgencyStyles[task.urgency],
+          isDragging && "ring-2 ring-slate-900 ring-offset-2",
+          isDropTarget && "outline outline-2 outline-offset-2 outline-slate-900"
         )}
         transition={{ type: "spring", stiffness: 320, damping: 26 }}
       >
@@ -71,29 +103,11 @@ function TaskCard({
           <h3 className={clsx("text-sm font-semibold leading-tight", task.urgency === "high" && "text-red-600")}>
             {task.title}
           </h3>
-          <div className="flex items-center gap-1">
-            <button
-              type="button"
-              onClick={(event) => {
-                event.preventDefault();
-                onMoveToTop();
-              }}
-              disabled={isReordering}
-              className="rounded-md bg-slate-900 px-2 py-1 text-[11px] font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              ↑ Top
-            </button>
-            <button
-              type="button"
-              onClick={(event) => {
-                event.preventDefault();
-                onMoveDown();
-              }}
-              disabled={isReordering || !canMoveDown}
-              className="rounded-md border border-slate-300 px-2 py-1 text-[11px] font-semibold text-slate-800 transition hover:border-slate-400 hover:text-slate-900 disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              ↓ Down
-            </button>
+          <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+            <span className="hidden text-slate-600 sm:inline">Drag to reorder</span>
+            <span aria-hidden className="select-none rounded-md border border-slate-200 px-2 py-1 text-slate-700">
+              ⋮⋮
+            </span>
           </div>
         </div>
         {task.notes ? (
@@ -127,6 +141,8 @@ export function BoardView({ tasklists }: BoardViewProps) {
   const [detailTask, setDetailTask] = useState<{ task: Task; listTitle: string } | null>(null);
   const [isPending, startTransition] = useTransition();
   const [isActionPending, startActionTransition] = useTransition();
+  const [draggingTask, setDraggingTask] = useState<DragState>(null);
+  const [dragOverTaskId, setDragOverTaskId] = useState<string | null>(null);
 
   useEffect(() => {
     const fallback = tasklists.map((list) => list.id);
@@ -248,6 +264,31 @@ export function BoardView({ tasklists }: BoardViewProps) {
     startActionTransition(async () => {
       await reorderTask(tasklistId, taskId, previousTaskId);
     });
+  };
+
+  const beginDrag = (listId: string, taskId: string) => {
+    if (isActionPending) return;
+    setDraggingTask({ listId, taskId });
+  };
+
+  const endDrag = () => {
+    setDraggingTask(null);
+    setDragOverTaskId(null);
+  };
+
+  const moveBeforeTask = (listId: string, targetTaskId: string, tasks: Task[]) => {
+    if (!draggingTask || draggingTask.listId !== listId || draggingTask.taskId === targetTaskId) return;
+    const withoutDragged = tasks.filter((task) => task.id !== draggingTask.taskId);
+    const targetIndex = withoutDragged.findIndex((task) => task.id === targetTaskId);
+    const previousTask = withoutDragged[targetIndex - 1];
+    handleReorder(listId, draggingTask.taskId, previousTask?.id);
+  };
+
+  const moveToListEnd = (listId: string, tasks: Task[]) => {
+    if (!draggingTask || draggingTask.listId !== listId) return;
+    const withoutDragged = tasks.filter((task) => task.id !== draggingTask.taskId);
+    const lastTask = withoutDragged[withoutDragged.length - 1];
+    handleReorder(listId, draggingTask.taskId, lastTask?.id);
   };
 
   const handleClearCompleted = (tasklistId: string) => {
@@ -434,23 +475,54 @@ export function BoardView({ tasklists }: BoardViewProps) {
                       {column.tasks.filter((task) => selectedTaskIds.has(`${column.key}:${task.id}`)).length} selected
                     </span>
                   </div>
-                  {column.tasks.map((task, index) => {
-                    const nextTask = column.tasks[index + 1];
+                  {column.tasks.map((task) => {
+                    const isDropTarget = dragOverTaskId === task.id && draggingTask?.listId === column.key;
                     return (
                       <TaskCard
                         key={task.id}
                         task={task}
                         listTitle={column.label}
                         isSelected={selectedTaskIds.has(`${column.key}:${task.id}`)}
-                        canMoveDown={!!nextTask}
                         isReordering={isActionPending}
+                        isDragging={draggingTask?.taskId === task.id}
+                        isDropTarget={isDropTarget}
                         onToggle={() => handleToggleTask(column.key, task.id)}
                         onViewDetails={() => openTaskDetails(task, column.label)}
-                        onMoveToTop={() => handleReorder(column.key, task.id, undefined)}
-                        onMoveDown={() => handleReorder(column.key, task.id, nextTask?.id)}
+                        onDragStart={() => beginDrag(column.key, task.id)}
+                        onDragEnd={endDrag}
+                        onDragOver={() => {
+                          if (draggingTask?.listId !== column.key) return;
+                          setDragOverTaskId(task.id);
+                        }}
+                        onDrop={() => {
+                          moveBeforeTask(column.key, task.id, column.tasks);
+                          endDrag();
+                        }}
+                        onDragLeave={() => {
+                          if (dragOverTaskId === task.id) setDragOverTaskId(null);
+                        }}
                       />
                     );
                   })}
+                  {draggingTask?.listId === column.key ? (
+                    <div
+                      className={clsx(
+                        "rounded-lg border border-dashed border-slate-300 px-3 py-2 text-center text-xs text-slate-500 transition",
+                        dragOverTaskId === null && "bg-slate-50"
+                      )}
+                      onDragOver={(event) => {
+                        event.preventDefault();
+                        setDragOverTaskId(null);
+                      }}
+                      onDrop={(event) => {
+                        event.preventDefault();
+                        moveToListEnd(column.key, column.tasks);
+                        endDrag();
+                      }}
+                    >
+                      Drop here to place at end
+                    </div>
+                  ) : null}
                 </div>
               </div>
             ))}
@@ -495,23 +567,54 @@ export function BoardView({ tasklists }: BoardViewProps) {
                       </button>
                     ) : null}
                   </div>
-                  {activeColumn.tasks.map((task, index, arr) => {
-                    const nextTask = arr[index + 1];
+                  {activeColumn.tasks.map((task) => {
+                    const isDropTarget = dragOverTaskId === task.id && draggingTask?.listId === activeColumn.key;
                     return (
                       <TaskCard
                         key={task.id}
                         task={task}
                         listTitle={activeListLabel}
                         isSelected={selectedTaskIds.has(`${activeList}:${task.id}`)}
-                        canMoveDown={!!nextTask}
                         isReordering={isActionPending}
+                        isDragging={draggingTask?.taskId === task.id}
+                        isDropTarget={isDropTarget}
                         onToggle={() => handleToggleTask(activeList, task.id)}
                         onViewDetails={() => openTaskDetails(task, activeListLabel)}
-                        onMoveToTop={() => handleReorder(activeList, task.id, undefined)}
-                        onMoveDown={() => handleReorder(activeList, task.id, nextTask?.id)}
+                        onDragStart={() => beginDrag(activeList, task.id)}
+                        onDragEnd={endDrag}
+                        onDragOver={() => {
+                          if (draggingTask?.listId !== activeList) return;
+                          setDragOverTaskId(task.id);
+                        }}
+                        onDrop={() => {
+                          moveBeforeTask(activeList, task.id, activeColumn.tasks);
+                          endDrag();
+                        }}
+                        onDragLeave={() => {
+                          if (dragOverTaskId === task.id) setDragOverTaskId(null);
+                        }}
                       />
                     );
                   })}
+                  {draggingTask?.listId === activeColumn.key ? (
+                    <div
+                      className={clsx(
+                        "rounded-lg border border-dashed border-slate-300 px-3 py-2 text-center text-xs text-slate-500 transition",
+                        dragOverTaskId === null && "bg-slate-50"
+                      )}
+                      onDragOver={(event) => {
+                        event.preventDefault();
+                        setDragOverTaskId(null);
+                      }}
+                      onDrop={(event) => {
+                        event.preventDefault();
+                        moveToListEnd(activeColumn.key, activeColumn.tasks);
+                        endDrag();
+                      }}
+                    >
+                      Drop here to place at end
+                    </div>
+                  ) : null}
                 </>
               ) : null}
             </div>
@@ -523,14 +626,14 @@ export function BoardView({ tasklists }: BoardViewProps) {
 
       {detailTask ? (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4"
+          className="fixed inset-0 z-50 flex items-start justify-center bg-slate-900/50 p-4 overflow-y-auto"
           onClick={closeTaskDetails}
         >
           <div
             role="dialog"
             aria-modal="true"
             aria-label={`Task details for ${detailTask.task.title}`}
-            className="card-surface relative w-full max-w-xl border-slate-200 p-5 shadow-lg"
+            className="card-surface relative w-full max-w-xl border-slate-200 p-5 shadow-lg max-h-[80vh] overflow-y-auto"
             onClick={(event) => event.stopPropagation()}
           >
             <button

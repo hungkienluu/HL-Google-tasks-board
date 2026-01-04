@@ -1,6 +1,14 @@
 "use client";
 
-import { useEffect, useMemo, useState, useTransition, type DragEvent, type MouseEvent } from "react";
+import {
+  useEffect,
+  useMemo,
+  useState,
+  useTransition,
+  type DragEvent,
+  type MouseEvent,
+  type TouchEvent
+} from "react";
 import clsx from "clsx";
 import { AnimatePresence, motion } from "framer-motion";
 import type { Task, TaskListWithTasks } from "@/lib/tasks/schema";
@@ -26,6 +34,7 @@ type DragState = { listId: string; taskId: string } | null;
 
 function TaskCard({
   task,
+  listId,
   listTitle,
   isSelected,
   isReordering,
@@ -37,9 +46,13 @@ function TaskCard({
   onDragEnd,
   onDragOver,
   onDrop,
-  onDragLeave
+  onDragLeave,
+  onTouchStart,
+  onTouchMove,
+  onTouchEnd
 }: {
   task: Task;
+  listId: string;
   listTitle: string;
   isSelected: boolean;
   isReordering: boolean;
@@ -52,6 +65,9 @@ function TaskCard({
   onDragOver: (event: DragEvent<HTMLElement>) => void;
   onDrop: (event: DragEvent<HTMLElement>) => void;
   onDragLeave: () => void;
+  onTouchStart: (event: TouchEvent<HTMLElement>) => void;
+  onTouchMove: (event: TouchEvent<HTMLElement>) => void;
+  onTouchEnd: () => void;
 }) {
   const handleViewDetails = (event: MouseEvent<HTMLButtonElement>) => {
     event.preventDefault();
@@ -81,7 +97,13 @@ function TaskCard({
         onDrop(event);
       }}
       onDragLeave={onDragLeave}
+      onTouchStart={onTouchStart}
+      onTouchMove={onTouchMove}
+      onTouchEnd={onTouchEnd}
+      onTouchCancel={onTouchEnd}
       aria-grabbed={isDragging}
+      data-task-id={task.id}
+      data-list-id={listId}
     >
       <input
         type="checkbox"
@@ -292,6 +314,44 @@ export function BoardView({ tasklists }: BoardViewProps) {
     handleReorder(listId, draggingTask.taskId, lastTask?.id);
   };
 
+  const findTouchTarget = (touchEvent: TouchEvent<HTMLElement>) => {
+    const touch = touchEvent.touches[0];
+    if (!touch) return null;
+    const target = document.elementFromPoint(touch.clientX, touch.clientY);
+    if (!target) return null;
+    const card = target.closest("[data-task-id]") as HTMLElement | null;
+    if (!card) return null;
+    const taskId = card.dataset.taskId;
+    const listId = card.dataset.listId;
+    if (!taskId || !listId) return null;
+    return { taskId, listId };
+  };
+
+  const handleTouchStart = (listId: string, taskId: string) => {
+    beginDrag(listId, taskId);
+  };
+
+  const handleTouchMove =
+    (listId: string, tasks: Task[]) => (event: TouchEvent<HTMLElement>) => {
+      if (!draggingTask || draggingTask.listId !== listId) return;
+      const target = findTouchTarget(event);
+      if (!target || target.listId !== listId) {
+        setDragOverTaskId(null);
+        return;
+      }
+      event.preventDefault();
+      setDragOverTaskId(target.taskId);
+      moveBeforeTask(listId, target.taskId, tasks);
+    };
+
+  const handleTouchEnd = (listId: string, tasks: Task[]) => () => {
+    if (!draggingTask || draggingTask.listId !== listId) return;
+    if (dragOverTaskId === null) {
+      moveToListEnd(listId, tasks);
+    }
+    endDrag();
+  };
+
   const handleClearCompleted = (tasklistId: string) => {
     startActionTransition(async () => {
       await clearCompletedInList(tasklistId);
@@ -482,6 +542,7 @@ export function BoardView({ tasklists }: BoardViewProps) {
                       <TaskCard
                         key={task.id}
                         task={task}
+                        listId={column.key}
                         listTitle={column.label}
                         isSelected={selectedTaskIds.has(`${column.key}:${task.id}`)}
                         isReordering={isActionPending}
@@ -502,6 +563,9 @@ export function BoardView({ tasklists }: BoardViewProps) {
                         onDragLeave={() => {
                           if (dragOverTaskId === task.id) setDragOverTaskId(null);
                         }}
+                        onTouchStart={() => handleTouchStart(column.key, task.id)}
+                        onTouchMove={handleTouchMove(column.key, column.tasks)}
+                        onTouchEnd={handleTouchEnd(column.key, column.tasks)}
                       />
                     );
                   })}
@@ -574,6 +638,7 @@ export function BoardView({ tasklists }: BoardViewProps) {
                       <TaskCard
                         key={task.id}
                         task={task}
+                        listId={activeColumn.key}
                         listTitle={activeListLabel}
                         isSelected={selectedTaskIds.has(`${activeList}:${task.id}`)}
                         isReordering={isActionPending}
@@ -594,6 +659,9 @@ export function BoardView({ tasklists }: BoardViewProps) {
                         onDragLeave={() => {
                           if (dragOverTaskId === task.id) setDragOverTaskId(null);
                         }}
+                        onTouchStart={() => handleTouchStart(activeList, task.id)}
+                        onTouchMove={handleTouchMove(activeList, activeColumn.tasks)}
+                        onTouchEnd={handleTouchEnd(activeList, activeColumn.tasks)}
                       />
                     );
                   })}

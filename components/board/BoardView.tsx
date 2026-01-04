@@ -17,7 +17,6 @@ import {
   type DraggableAttributes,
   type DragEndEvent,
   type DragStartEvent,
-  type SyntheticListenerMap,
   useSensor,
   useSensors
 } from "@dnd-kit/core";
@@ -58,7 +57,7 @@ type TaskCardProps = {
   dragOverlay?: boolean;
   onToggle: () => void;
   onViewDetails: () => void;
-  handleProps?: DraggableAttributes & SyntheticListenerMap;
+  handleProps?: DraggableAttributes & Record<string, unknown>;
   style?: CSSProperties;
 };
 

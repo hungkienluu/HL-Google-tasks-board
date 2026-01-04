@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState, useTransition } from "react";
+import { useEffect, useMemo, useState, useTransition, type MouseEvent } from "react";
 import clsx from "clsx";
 import type { Task, TaskListWithTasks } from "@/lib/tasks/schema";
 import { moveTasksToList } from "@/app/actions/syncEngine";
@@ -19,18 +19,28 @@ type SelectionState = Set<string>;
 
 function TaskCard({
   task,
+  listTitle,
   isSelected,
-  onToggle
+  onToggle,
+  onViewDetails
 }: {
   task: Task;
+  listTitle: string;
   isSelected: boolean;
   onToggle: () => void;
+  onViewDetails: () => void;
 }) {
+  const handleViewDetails = (event: MouseEvent<HTMLButtonElement>) => {
+    event.preventDefault();
+    event.stopPropagation();
+    onViewDetails();
+  };
+
   return (
     <label className="group relative block">
       <input
         type="checkbox"
-        className="peer absolute left-2 top-2 h-4 w-4 accent-slate-900"
+        className="peer absolute left-2 top-2 z-10 h-4 w-4 rounded border border-slate-300 bg-white text-slate-900 shadow-sm accent-slate-900 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-900"
         checked={isSelected}
         onChange={onToggle}
         aria-label={`Select task ${task.title}`}
@@ -47,7 +57,18 @@ function TaskCard({
         ) : null}
         <div className="mt-2 flex items-center justify-between text-[11px] uppercase tracking-wide text-slate-500">
           <span>{task.urgency === "high" ? "🔥 This Week" : task.urgency === "medium" ? "Next" : "Later"}</span>
-          <span>{task.status === "completed" ? "Done" : "Active"}</span>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={handleViewDetails}
+              className="rounded-full border border-slate-200 px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-slate-700 transition hover:border-slate-300 hover:bg-slate-50"
+            >
+              View details
+            </button>
+            <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-slate-700">
+              {listTitle}
+            </span>
+          </div>
         </div>
       </article>
     </label>
@@ -62,6 +83,7 @@ export function BoardView({ tasklists }: BoardViewProps) {
   const [activeList, setActiveList] = useState<string>(tasklists[0]?.id ?? "");
   const [selectedTaskIds, setSelectedTaskIds] = useState<SelectionState>(new Set());
   const [destinationListId, setDestinationListId] = useState<string>("");
+  const [detailTask, setDetailTask] = useState<{ task: Task; listTitle: string } | null>(null);
   const [isPending, startTransition] = useTransition();
 
   useEffect(() => {
@@ -169,9 +191,13 @@ export function BoardView({ tasklists }: BoardViewProps) {
     });
   };
 
+  const openTaskDetails = (task: Task, listTitle: string) => setDetailTask({ task, listTitle });
+  const closeTaskDetails = () => setDetailTask(null);
+
   const clearSelection = () => setSelectedTaskIds(new Set());
 
   const hasColumns = columns.length > 0;
+  const activeListLabel = columns.find((column) => column.key === activeList)?.label ?? "";
 
   return (
     <div className="flex w-full flex-col gap-4">
@@ -282,8 +308,10 @@ export function BoardView({ tasklists }: BoardViewProps) {
                     <TaskCard
                       key={task.id}
                       task={task}
+                      listTitle={column.label}
                       isSelected={selectedTaskIds.has(`${column.key}:${task.id}`)}
                       onToggle={() => handleToggleTask(column.key, task.id)}
+                      onViewDetails={() => openTaskDetails(task, column.label)}
                     />
                   ))}
                 </div>
@@ -314,8 +342,10 @@ export function BoardView({ tasklists }: BoardViewProps) {
                   <TaskCard
                     key={task.id}
                     task={task}
+                    listTitle={activeListLabel}
                     isSelected={selectedTaskIds.has(`${activeList}:${task.id}`)}
                     onToggle={() => handleToggleTask(activeList, task.id)}
+                    onViewDetails={() => openTaskDetails(task, activeListLabel)}
                   />
                 ))}
             </div>
@@ -324,6 +354,76 @@ export function BoardView({ tasklists }: BoardViewProps) {
       ) : (
         <p className="text-sm text-slate-600">No lists selected. Choose at least one list to view tasks.</p>
       )}
+
+      {detailTask ? (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4"
+          onClick={closeTaskDetails}
+        >
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-label={`Task details for ${detailTask.task.title}`}
+            className="card-surface relative w-full max-w-xl border-slate-200 p-5 shadow-lg"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <button
+              type="button"
+              onClick={closeTaskDetails}
+              className="absolute right-3 top-3 rounded-full border border-slate-200 px-2 py-1 text-xs font-semibold text-slate-700 transition hover:bg-slate-50"
+            >
+              Close
+            </button>
+            <p className="text-xs uppercase tracking-[0.2em] text-slate-500">Task Details</p>
+            <h3 className="mt-1 text-xl font-semibold text-slate-900">{detailTask.task.title}</h3>
+            <div className="mt-3 flex flex-wrap gap-2 text-[11px] font-semibold uppercase tracking-wide text-slate-700">
+              <span className="rounded-full bg-slate-100 px-2 py-1">List: {detailTask.listTitle}</span>
+              <span
+                className={clsx(
+                  "rounded-full px-2 py-1",
+                  detailTask.task.urgency === "high"
+                    ? "bg-red-100 text-red-700"
+                    : detailTask.task.urgency === "medium"
+                      ? "bg-amber-100 text-amber-700"
+                      : "bg-slate-100 text-slate-700"
+                )}
+              >
+                {detailTask.task.urgency} priority
+              </span>
+              <span
+                className={clsx(
+                  "rounded-full px-2 py-1",
+                  detailTask.task.status === "completed"
+                    ? "bg-emerald-100 text-emerald-700"
+                    : "bg-blue-100 text-blue-700"
+                )}
+              >
+                {detailTask.task.status === "completed" ? "Completed" : "Active"}
+              </span>
+            </div>
+            <dl className="mt-4 grid grid-cols-1 gap-3 text-sm text-slate-700 sm:grid-cols-2">
+              <div>
+                <dt className="text-xs uppercase tracking-wide text-slate-500">Due</dt>
+                <dd className="font-medium">
+                  {detailTask.task.due ? new Date(detailTask.task.due).toLocaleString() : "No due date"}
+                </dd>
+              </div>
+              <div>
+                <dt className="text-xs uppercase tracking-wide text-slate-500">Updated</dt>
+                <dd className="font-medium">
+                  {detailTask.task.updated ? new Date(detailTask.task.updated).toLocaleString() : "Unknown"}
+                </dd>
+              </div>
+            </dl>
+            {detailTask.task.notes ? (
+              <div className="mt-4 space-y-2">
+                <h4 className="text-sm font-semibold text-slate-900">Notes</h4>
+                <p className="text-sm text-slate-700 whitespace-pre-line">{detailTask.task.notes}</p>
+              </div>
+            ) : null}
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }

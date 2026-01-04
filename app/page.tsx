@@ -1,12 +1,11 @@
 import { QuickAddBar } from "@/components/QuickAddBar";
 import { BoardView } from "@/components/board/BoardView";
 import { SyncControls } from "@/components/SyncControls";
-import { TaskSnapshot } from "@/components/TaskSnapshot";
 import { sampleTasks } from "@/lib/tasks/sampleData";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { ConnectGooglePrompt } from "@/components/ConnectGooglePrompt";
-import { fetchDefaultTaskSnapshot, fetchTasklistsWithTasks } from "@/app/actions/syncEngine";
+import { fetchTasklistsWithTasks } from "@/app/actions/syncEngine";
 import { listRoutingCatalog } from "@/lib/tasks/schema";
 
 export default async function HomePage() {
@@ -18,7 +17,6 @@ export default async function HomePage() {
         title: rule.label,
         tasks: sampleTasks[rule.key] ?? []
       }));
-  const snapshot = session ? await fetchDefaultTaskSnapshot() : null;
 
   return (
     <main className="mx-auto flex max-w-6xl flex-col gap-6 px-4 py-8">
@@ -36,7 +34,6 @@ export default async function HomePage() {
       {session ? (
         <>
           <QuickAddBar />
-          {snapshot ? <TaskSnapshot tasks={snapshot.tasks} error={snapshot.error} /> : null}
           <BoardView tasklists={tasksByList} />
         </>
       ) : (

@@ -9,6 +9,15 @@ import { listRoutingCatalog, type Task } from "@/lib/tasks/schema";
 
 const DEFAULT_LIST_ID = process.env.DEFAULT_TASKLIST_ID ?? "@default";
 
+export type TaskSnapshot = {
+  id: string;
+  title: string;
+  status: Task["status"];
+  due?: string;
+  updated?: string;
+  notes?: string;
+};
+
 async function getAuthorizedTasksClient() {
   const session = await getServerSession(authOptions);
   if (!session?.accessToken) {
@@ -124,4 +133,36 @@ export async function fetchTasksByList(): Promise<Record<string, Task[]>> {
   }
 
   return lists;
+}
+
+export async function fetchDefaultTaskSnapshot(limit = 10): Promise<{ tasks: TaskSnapshot[]; error?: string }> {
+  try {
+    const tasksClient = await getAuthorizedTasksClient();
+    const response = await tasksClient.tasks.list({
+      tasklist: DEFAULT_LIST_ID,
+      maxResults: limit,
+      showCompleted: true,
+      showHidden: true
+    });
+
+    const items = response.data.items ?? [];
+    const tasks: TaskSnapshot[] = items
+      .filter((item) => item.id && item.title)
+      .map((item) => ({
+        id: item.id!,
+        title: item.title!,
+        status: (item.status as Task["status"]) ?? "needsAction",
+        due: item.due ?? undefined,
+        updated: item.updated ?? undefined,
+        notes: item.notes ?? undefined
+      }));
+
+    return { tasks };
+  } catch (error) {
+    console.error("Failed to fetch default task snapshot", error);
+    return {
+      tasks: [],
+      error: "Unable to load your default Google Tasks list. Check your connection and permissions."
+    };
+  }
 }

@@ -388,19 +388,31 @@ export function BoardView({ tasklists }: BoardViewProps) {
       transition
     };
 
+    const shouldShowDropIndicator = isOver && !isDragging;
+
     return (
-      <TaskCard
-        ref={setNodeRef}
-        task={task}
-        listTitle={listTitle}
-        isSelected={isSelected}
-        isDragging={isDragging}
-        isDropTarget={isOver}
-        onToggle={onToggle}
-        onViewDetails={onViewDetails}
-        handleProps={{ ...attributes, ...listeners }}
-        style={style}
-      />
+      <div className="flex flex-col gap-2">
+        {shouldShowDropIndicator ? (
+          <motion.div
+            layout
+            className="h-3 rounded-md border-2 border-dashed border-slate-300 bg-white shadow-[inset_0_1px_0_rgba(0,0,0,0.04)]"
+            transition={{ type: "spring", stiffness: 300, damping: 26 }}
+            aria-hidden
+          />
+        ) : null}
+        <TaskCard
+          ref={setNodeRef}
+          task={task}
+          listTitle={listTitle}
+          isSelected={isSelected}
+          isDragging={isDragging}
+          isDropTarget={shouldShowDropIndicator}
+          onToggle={onToggle}
+          onViewDetails={onViewDetails}
+          handleProps={{ ...attributes, ...listeners }}
+          style={style}
+        />
+      </div>
     );
   };
 

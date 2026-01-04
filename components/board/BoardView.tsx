@@ -345,8 +345,12 @@ export function BoardView({ tasklists }: BoardViewProps) {
       const listId = activeData.listId;
       let previousTaskId: string | undefined;
       let shouldPersist = false;
-      setTasklistsState((current) =>
-        current.map((list) => {
+      let rollbackState: TaskListWithTasks[] | null = null;
+
+      setTasklistsState((current) => {
+        rollbackState = current.map((list) => ({ ...list, tasks: [...(list.tasks ?? [])] }));
+
+        return current.map((list) => {
           if (list.id !== listId) return list;
           const tasks = list.tasks ?? [];
           const oldIndex = tasks.findIndex((task) => task.id === activeData.task.id);
@@ -356,12 +360,16 @@ export function BoardView({ tasklists }: BoardViewProps) {
           previousTaskId = reordered[newIndex - 1]?.id;
           shouldPersist = true;
           return { ...list, tasks: reordered };
-        })
-      );
+        });
+      });
 
       if (shouldPersist) {
-        startActionTransition(async () => {
-          await reorderTask(listId, activeData.task.id, previousTaskId);
+        const safeRollback = rollbackState;
+        startActionTransition(() => {
+          reorderTask(listId, activeData.task.id, previousTaskId).catch((error) => {
+            console.error("Failed to reorder task", error);
+            if (safeRollback) setTasklistsState(safeRollback);
+          });
         });
       }
     }
@@ -406,7 +414,7 @@ export function BoardView({ tasklists }: BoardViewProps) {
         {shouldShowDropIndicator ? (
           <motion.div
             layout
-            className="h-4 rounded-md border-2 border-dashed border-slate-300 bg-white shadow-[inset_0_1px_0_rgba(0,0,0,0.04)]"
+            className="h-12 rounded-md border-2 border-dashed border-slate-300 bg-white shadow-[inset_0_1px_0_rgba(0,0,0,0.04)]"
             transition={{ type: "spring", stiffness: 300, damping: 26 }}
             aria-hidden
           />

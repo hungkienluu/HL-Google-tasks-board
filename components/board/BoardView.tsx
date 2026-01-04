@@ -1,16 +1,8 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import clsx from "clsx";
-import type { Task } from "@/lib/tasks/schema";
-import { routingListKeys } from "@/lib/tasks/schema";
-
-const listLabels: Record<string, string> = {
-  family: "Family",
-  homeImprovement: "Home Improvement",
-  homeMaintenance: "Home Maintenance",
-  square: "Square"
-};
+import type { Task, TaskListWithTasks } from "@/lib/tasks/schema";
 
 const urgencyStyles: Record<Task["urgency"], string> = {
   high: "task-border-high",
@@ -19,7 +11,7 @@ const urgencyStyles: Record<Task["urgency"], string> = {
 };
 
 type BoardViewProps = {
-  tasksByList: Record<string, Task[]>;
+  tasklists: TaskListWithTasks[];
 };
 
 function TaskCard({ task }: { task: Task }) {
@@ -42,61 +34,121 @@ function TaskCard({ task }: { task: Task }) {
   );
 }
 
-export function BoardView({ tasksByList }: BoardViewProps) {
-  const [activeList, setActiveList] = useState<string>("family");
+export function BoardView({ tasklists }: BoardViewProps) {
+  const [visibleListIds, setVisibleListIds] = useState<string[]>(() => {
+    const nonDefault = tasklists.filter((list) => !list.isDefault).map((list) => list.id);
+    return nonDefault.length > 0 ? nonDefault : tasklists.map((list) => list.id);
+  });
+  const [activeList, setActiveList] = useState<string>(tasklists[0]?.id ?? "");
 
-  const columns = useMemo(() => {
-    return routingListKeys
-      .filter((key) => key !== "default")
-      .map((key) => ({
-        key,
-        label: listLabels[key] ?? key,
-        tasks: tasksByList[key] ?? []
-      }));
-  }, [tasksByList]);
+  useEffect(() => {
+    const defaults = tasklists.filter((list) => !list.isDefault).map((list) => list.id);
+    const fallback = defaults.length > 0 ? defaults : tasklists.map((list) => list.id);
+    setVisibleListIds((current) => {
+      if (current.length === 0) return fallback;
+      const stillVisible = current.filter((id) => tasklists.some((list) => list.id === id));
+      return stillVisible.length > 0 ? stillVisible : fallback;
+    });
+  }, [tasklists]);
+
+  useEffect(() => {
+    const firstVisible = visibleListIds.find((id) => tasklists.some((list) => list.id === id));
+    if (firstVisible) {
+      setActiveList(firstVisible);
+    }
+  }, [visibleListIds, tasklists]);
+
+  const toggleList = (id: string) => {
+    setVisibleListIds((current) => {
+      const isSelected = current.includes(id);
+      if (isSelected) {
+        const next = current.filter((item) => item !== id);
+        return next.length > 0 ? next : current;
+      }
+      return [...current, id];
+    });
+  };
+
+  const columns = useMemo(
+    () =>
+      tasklists
+        .map((list) => ({
+          key: list.id,
+          label: list.title,
+          tasks: [...(list.tasks ?? [])].sort((a, b) =>
+            a.urgency === "high" ? -1 : b.urgency === "high" ? 1 : 0
+          )
+        }))
+        .filter((column) => visibleListIds.includes(column.key)),
+    [tasklists, visibleListIds]
+  );
+
+  const hasColumns = columns.length > 0;
 
   return (
     <div className="flex w-full flex-col gap-4">
-      <div className="hidden gap-4 md:grid md:grid-cols-2 xl:grid-cols-4">
-        {columns.map((column) => (
-          <div key={column.key} className="flex flex-col gap-3">
-            <div className="flex items-center justify-between">
-              <h2 className="text-lg font-semibold text-slate-900">{column.label}</h2>
-              <span className="text-xs text-slate-500">{column.tasks.length} tasks</span>
-            </div>
-            <div className="flex flex-col gap-3">
-              {column.tasks
-                .sort((a, b) => (a.urgency === "high" ? -1 : b.urgency === "high" ? 1 : 0))
-                .map((task) => (
-                  <TaskCard key={task.id} task={task} />
-                ))}
-            </div>
-          </div>
+      <div className="flex flex-wrap gap-2">
+        {tasklists.map((list) => (
+          <button
+            key={list.id}
+            type="button"
+            onClick={() => toggleList(list.id)}
+            className={clsx(
+              "rounded-full border px-3 py-1 text-xs font-semibold transition",
+              visibleListIds.includes(list.id)
+                ? "border-slate-900 bg-slate-900 text-white"
+                : "border-slate-200 bg-white text-slate-700 hover:border-slate-300"
+            )}
+          >
+            {list.title}
+          </button>
         ))}
       </div>
 
-      <div className="md:hidden">
-        <div className="card-surface mb-3 grid grid-cols-4 text-center text-xs font-medium text-slate-600">
-          {columns.map((column) => (
-            <button
-              key={column.key}
-              className={clsx(
-                "px-2 py-2",
-                activeList === column.key && "border-b-2 border-slate-900 text-slate-900"
-              )}
-              onClick={() => setActiveList(column.key)}
-              type="button"
-            >
-              {column.label}
-            </button>
-          ))}
-        </div>
-        <div className="flex flex-col gap-3">
-          {columns
-            .find((column) => column.key === activeList)
-            ?.tasks.map((task) => <TaskCard key={task.id} task={task} />)}
-        </div>
-      </div>
+      {hasColumns ? (
+        <>
+          <div className="hidden gap-4 md:grid md:grid-cols-2 xl:grid-cols-4">
+            {columns.map((column) => (
+              <div key={column.key} className="flex flex-col gap-3">
+                <div className="flex items-center justify-between">
+                  <h2 className="text-lg font-semibold text-slate-900">{column.label}</h2>
+                  <span className="text-xs text-slate-500">{column.tasks.length} tasks</span>
+                </div>
+                <div className="flex flex-col gap-3">
+                  {column.tasks.map((task) => (
+                    <TaskCard key={task.id} task={task} />
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+
+          <div className="md:hidden">
+            <div className="card-surface mb-3 grid grid-cols-4 text-center text-xs font-medium text-slate-600">
+              {columns.map((column) => (
+                <button
+                  key={column.key}
+                  className={clsx(
+                    "px-2 py-2",
+                    activeList === column.key && "border-b-2 border-slate-900 text-slate-900"
+                  )}
+                  onClick={() => setActiveList(column.key)}
+                  type="button"
+                >
+                  {column.label}
+                </button>
+              ))}
+            </div>
+            <div className="flex flex-col gap-3">
+              {columns
+                .find((column) => column.key === activeList)
+                ?.tasks.map((task) => <TaskCard key={task.id} task={task} />)}
+            </div>
+          </div>
+        </>
+      ) : (
+        <p className="text-sm text-slate-600">No lists selected. Choose at least one list to view tasks.</p>
+      )}
     </div>
   );
 }

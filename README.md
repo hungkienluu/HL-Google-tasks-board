@@ -18,7 +18,7 @@ TaskPulse is a Next.js (App Router) dashboard that triages tasks created in the 
    - `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET`
    - `NEXTAUTH_SECRET`
    - `DEFAULT_TASKLIST_ID` (usually `@default`)
-   - List IDs for Family, Home Improvement, Home Maintenance, Square
+   - `FAMILY_TASKLIST_ID`, `HOME_IMPROVEMENT_TASKLIST_ID`, `HOME_MAINTENANCE_TASKLIST_ID`, `SQUARE_TASKLIST_ID`
 3. Run the dev server:
    ```bash
    npm run dev
@@ -31,8 +31,9 @@ TaskPulse is a Next.js (App Router) dashboard that triages tasks created in the 
   - Inspect Default list tasks and move them to matched lists with metadata.
   - Bulk-archive completed tasks across lists.
   - Quick add tasks to a chosen list.
-- **UI**: `components/board/BoardView.tsx`, `components/QuickAddBar.tsx`, and `components/SyncControls.tsx` provide the urgency Kanban, quick-add bar, and action buttons. `app/page.tsx` wires them together with sample data for local preview.
+  - Fetch all Google Task lists plus their tasks for the dashboard.
+- **UI**: `components/board/BoardView.tsx`, `components/QuickAddBar.tsx`, and `components/SyncControls.tsx` provide the urgency Kanban, quick-add bar, and action buttons. `app/page.tsx` wires them together, using live tasks when signed in and sample data when not.
 
 ## Notes
 - Server actions require an authenticated session; unauthenticated requests will throw.
-- The sample page uses mock data until you wire in `fetchTasksByList` for live tasks.
+- Signed-in sessions load your Google Task lists via `fetchTasklistsWithTasks`, while signed-out sessions fall back to mock data.

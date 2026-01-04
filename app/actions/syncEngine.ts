@@ -25,6 +25,35 @@ async function listAllTasklists(tasksClient: Awaited<ReturnType<typeof getAuthor
   return available;
 }
 
+async function resolveDefaultTasklist(
+  tasksClient: Awaited<ReturnType<typeof getAuthorizedTasksClient>>,
+  available: Tasklist[]
+) {
+  const normalizedTitle = (value?: string | null) => value?.trim().toLowerCase();
+  const matchesList = (list: Tasklist, candidate?: string | null) =>
+    !!candidate && (list.id === candidate || normalizedTitle(list.title) === normalizedTitle(candidate));
+
+  const matched = available.find(
+    (list) => matchesList(list, DEFAULT_LIST_ID) || matchesList(list, "My Tasks") || list.id === "@default"
+  );
+  if (matched?.id) return matched;
+
+  const fallbackCandidates = [DEFAULT_LIST_ID, "@default"].filter(Boolean);
+  for (const candidate of fallbackCandidates) {
+    try {
+      const response = await tasksClient.tasklists.get({ tasklist: candidate });
+      if (response.data?.id) {
+        return response.data;
+      }
+    } catch (error) {
+      console.warn(`Unable to fetch tasklist ${candidate} as default`, error);
+      continue;
+    }
+  }
+
+  return undefined;
+}
+
 function normalizeDueDate(due?: string | null) {
   if (!due) return undefined;
 
@@ -57,9 +86,7 @@ async function resolveTasklists(tasksClient: Awaited<ReturnType<typeof getAuthor
     }
   }
 
-  const defaultMatch = available.find(
-    (list) => matchesList(list, DEFAULT_LIST_ID) || matchesList(list, "My Tasks") || list.id === "@default"
-  );
+  const defaultMatch = await resolveDefaultTasklist(tasksClient, available);
   if (!defaultMatch?.id) {
     throw new Error(
       "Unable to resolve your default Google Tasks list. Set DEFAULT_TASKLIST_ID to a valid list ID or ensure your account has a 'My Tasks' list."

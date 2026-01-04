@@ -6,12 +6,18 @@ import { sampleTasks } from "@/lib/tasks/sampleData";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { ConnectGooglePrompt } from "@/components/ConnectGooglePrompt";
-import { fetchDefaultTaskSnapshot } from "@/app/actions/syncEngine";
+import { fetchDefaultTaskSnapshot, fetchTasklistsWithTasks } from "@/app/actions/syncEngine";
+import { listRoutingCatalog } from "@/lib/tasks/schema";
 
 export default async function HomePage() {
-  // In production, fetch tasks from Google Tasks via fetchTasksByList server action.
   const session = await getServerSession(authOptions);
-  const tasksByList = sampleTasks;
+  const tasksByList = session
+    ? await fetchTasklistsWithTasks()
+    : listRoutingCatalog.map((rule) => ({
+        id: rule.tasklistId ?? rule.key,
+        title: rule.label,
+        tasks: sampleTasks[rule.key] ?? []
+      }));
   const snapshot = session ? await fetchDefaultTaskSnapshot() : null;
 
   return (
@@ -31,7 +37,7 @@ export default async function HomePage() {
         <>
           <QuickAddBar />
           {snapshot ? <TaskSnapshot tasks={snapshot.tasks} error={snapshot.error} /> : null}
-          <BoardView tasksByList={tasksByList} />
+          <BoardView tasklists={tasksByList} />
         </>
       ) : (
         <ConnectGooglePrompt />

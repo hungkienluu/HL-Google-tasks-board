@@ -4,10 +4,35 @@ import { revalidatePath } from "next/cache";
 import { google } from "googleapis";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
-import { describeIntent, getTasklistIdFromKey, parseTaskIntent } from "@/lib/tasks/parser";
-import { listRoutingCatalog, type Task } from "@/lib/tasks/schema";
+import { describeIntent, parseTaskIntent } from "@/lib/tasks/parser";
+import { listRoutingCatalog, type Task, type TaskListSummary, type TaskListWithTasks } from "@/lib/tasks/schema";
 
 const DEFAULT_LIST_ID = process.env.DEFAULT_TASKLIST_ID ?? "@default";
+
+type ResolvedListMap = Map<string, string>;
+
+async function resolveTasklists(tasksClient: Awaited<ReturnType<typeof getAuthorizedTasksClient>>) {
+  const tasklistsResponse = await tasksClient.tasklists.list();
+  const available = tasklistsResponse.data.items ?? [];
+  const normalizedTitle = (value?: string) => value?.trim().toLowerCase();
+
+  const resolved: ResolvedListMap = new Map();
+  for (const rule of listRoutingCatalog) {
+    const envId = rule.tasklistId;
+    const matched = available.find(
+      (list) => list.id === envId || normalizedTitle(list.title) === normalizedTitle(rule.label)
+    );
+    if (matched?.id) {
+      resolved.set(rule.key, matched.id);
+    }
+  }
+
+  const defaultMatch = available.find(
+    (list) => list.id === DEFAULT_LIST_ID || list.title?.toLowerCase() === "my tasks"
+  );
+  resolved.set("default", defaultMatch?.id ?? DEFAULT_LIST_ID);
+  return { resolved, available };
+}
 
 export type TaskSnapshot = {
   id: string;
@@ -39,7 +64,9 @@ async function getAuthorizedTasksClient() {
 
 export async function syncDefaultList(): Promise<{ moved: number; inspected: number }> {
   const tasksClient = await getAuthorizedTasksClient();
-  const tasksResponse = await tasksClient.tasks.list({ tasklist: DEFAULT_LIST_ID });
+  const { resolved } = await resolveTasklists(tasksClient);
+  const defaultListId = resolved.get("default") ?? DEFAULT_LIST_ID;
+  const tasksResponse = await tasksClient.tasks.list({ tasklist: defaultListId });
   const tasks = tasksResponse.data.items ?? [];
 
   let moved = 0;
@@ -47,9 +74,9 @@ export async function syncDefaultList(): Promise<{ moved: number; inspected: num
     if (!task.id || !task.title) continue;
 
     const intent = parseTaskIntent(task.title);
-    const destinationListId = getTasklistIdFromKey(intent.targetList);
+    const destinationListId = resolved.get(intent.targetList);
 
-    if (!destinationListId || destinationListId === DEFAULT_LIST_ID) continue;
+    if (!destinationListId || destinationListId === defaultListId) continue;
 
     const notes = [task.notes ?? "", describeIntent(intent)].filter(Boolean).join("\n");
 
@@ -65,7 +92,7 @@ export async function syncDefaultList(): Promise<{ moved: number; inspected: num
     });
 
     await tasksClient.tasks.delete({
-      tasklist: DEFAULT_LIST_ID,
+      tasklist: defaultListId,
       task: task.id
     });
 
@@ -78,23 +105,29 @@ export async function syncDefaultList(): Promise<{ moved: number; inspected: num
 
 export async function bulkArchiveCompleted(): Promise<number> {
   const tasksClient = await getAuthorizedTasksClient();
+  const { resolved } = await resolveTasklists(tasksClient);
   let archived = 0;
 
   for (const listRule of listRoutingCatalog) {
-    await tasksClient.tasks.clear({ tasklist: listRule.tasklistId });
-    archived += 1;
+    const listId = resolved.get(listRule.key);
+    if (listId) {
+      await tasksClient.tasks.clear({ tasklist: listId });
+      archived += 1;
+    }
   }
 
-  await tasksClient.tasks.clear({ tasklist: DEFAULT_LIST_ID });
+  const defaultListId = resolved.get("default") ?? DEFAULT_LIST_ID;
+  await tasksClient.tasks.clear({ tasklist: defaultListId });
   revalidatePath("/");
   return archived;
 }
 
 export async function quickAddTask(title: string, notes?: string, listKey?: string) {
   const tasksClient = await getAuthorizedTasksClient();
+  const { resolved } = await resolveTasklists(tasksClient);
   const intent = parseTaskIntent(title);
   const targetKey = (listKey ?? intent.targetList) as typeof intent.targetList;
-  const targetListId = getTasklistIdFromKey(targetKey) ?? DEFAULT_LIST_ID;
+  const targetListId = resolved.get(targetKey) ?? DEFAULT_LIST_ID;
 
   await tasksClient.tasks.insert({
     tasklist: targetListId,
@@ -110,36 +143,61 @@ export async function quickAddTask(title: string, notes?: string, listKey?: stri
   revalidatePath("/");
 }
 
-export async function fetchTasksByList(): Promise<Record<string, Task[]>> {
+export async function fetchTasklists(): Promise<TaskListSummary[]> {
   const tasksClient = await getAuthorizedTasksClient();
-  const lists: Record<string, Task[]> = {};
+  const { available } = await resolveTasklists(tasksClient);
+  return (available ?? []).map((list) => ({
+    id: list.id!,
+    title: list.title ?? "Untitled list",
+    isDefault: (list.id === DEFAULT_LIST_ID || list.title?.toLowerCase() === "my tasks") ?? false
+  }));
+}
 
-  for (const listRule of listRoutingCatalog) {
-    const response = await tasksClient.tasks.list({ tasklist: listRule.tasklistId });
+export async function fetchTasklistsWithTasks(listIds?: string[]): Promise<TaskListWithTasks[]> {
+  const tasksClient = await getAuthorizedTasksClient();
+  const { available } = await resolveTasklists(tasksClient);
+  const filtered = (available ?? []).filter((list) => !listIds || listIds.includes(list.id!));
+
+  const results: TaskListWithTasks[] = [];
+  for (const list of filtered) {
+    if (!list.id) continue;
+    const response = await tasksClient.tasks.list({ tasklist: list.id });
     const items = response.data.items ?? [];
-    lists[listRule.key] = items
+    const tasks = items
       .filter((item) => item.id && item.title)
-      .map((item) => ({
-        id: item.id!,
-        title: item.title!,
-        notes: item.notes ?? undefined,
-        status: (item.status as Task["status"]) ?? "needsAction",
-        due: item.due ?? undefined,
-        updated: item.updated ?? undefined,
-        listId: listRule.tasklistId,
-        targetList: listRule.key,
-        urgency: parseTaskIntent(item.title ?? "").urgency
-      }));
+      .map((item) => {
+        const parsed = parseTaskIntent(item.title ?? "");
+        return {
+          id: item.id!,
+          title: item.title!,
+          notes: item.notes ?? undefined,
+          status: (item.status as Task["status"]) ?? "needsAction",
+          due: item.due ?? undefined,
+          updated: item.updated ?? undefined,
+          listId: list.id!,
+          targetList: parsed.targetList,
+          urgency: parsed.urgency
+        };
+      });
+
+    results.push({
+      id: list.id,
+      title: list.title ?? "Untitled list",
+      isDefault: (list.id === DEFAULT_LIST_ID || list.title?.toLowerCase() === "my tasks") ?? false,
+      tasks
+    });
   }
 
-  return lists;
+  return results;
 }
 
 export async function fetchDefaultTaskSnapshot(limit = 10): Promise<{ tasks: TaskSnapshot[]; error?: string }> {
   try {
     const tasksClient = await getAuthorizedTasksClient();
+    const { resolved } = await resolveTasklists(tasksClient);
+    const defaultListId = resolved.get("default") ?? DEFAULT_LIST_ID;
     const response = await tasksClient.tasks.list({
-      tasklist: DEFAULT_LIST_ID,
+      tasklist: defaultListId,
       maxResults: limit,
       showCompleted: true,
       showHidden: true

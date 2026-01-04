@@ -37,7 +37,7 @@ export type Task = z.infer<typeof TaskSchema>;
 export type ListRoutingRule = {
   key: RoutingListKey;
   label: string;
-  tasklistId: string;
+  tasklistId?: string;
   matchers: (string | RegExp)[];
 };
 
@@ -45,25 +45,25 @@ export const listRoutingCatalog: ListRoutingRule[] = [
   {
     key: "family",
     label: "Family",
-    tasklistId: "FAMILY_LIST_ID",
+    tasklistId: process.env.FAMILY_TASKLIST_ID,
     matchers: ["family", /👨‍👩‍👧‍👦/i, /👪/]
   },
   {
     key: "homeImprovement",
     label: "Home Improvement",
-    tasklistId: "HOME_IMPROVEMENT_LIST_ID",
+    tasklistId: process.env.HOME_IMPROVEMENT_TASKLIST_ID,
     matchers: ["home improvement", /🛠️/]
   },
   {
     key: "homeMaintenance",
     label: "Home Maintenance",
-    tasklistId: "HOME_MAINTENANCE_LIST_ID",
+    tasklistId: process.env.HOME_MAINTENANCE_TASKLIST_ID,
     matchers: ["home maintenance", /🧽/, /🧰/]
   },
   {
     key: "square",
     label: "Square",
-    tasklistId: "SQUARE_LIST_ID",
+    tasklistId: process.env.SQUARE_TASKLIST_ID,
     matchers: ["square", /🏢/]
   }
 ];
@@ -73,3 +73,11 @@ export const urgencyKeywords: Record<UrgencyLevel, (string | RegExp)[]> = {
   medium: ["next week", /soon/i, /upcoming/i],
   low: ["later", /someday/i, /eventually/i, /🧊/]
 };
+
+export type TaskListSummary = {
+  id: string;
+  title: string;
+  isDefault?: boolean;
+};
+
+export type TaskListWithTasks = TaskListSummary & { tasks: Task[] };

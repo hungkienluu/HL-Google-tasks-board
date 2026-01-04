@@ -58,6 +58,10 @@ function TaskCard({
     event.stopPropagation();
     onViewDetails();
   };
+  const handleDragStart = (event: DragEvent<HTMLElement>) => {
+    event.dataTransfer.effectAllowed = "move";
+    onDragStart();
+  };
 
   return (
     <motion.label
@@ -66,10 +70,7 @@ function TaskCard({
       initial={{ opacity: 0, y: 6 }}
       animate={{ opacity: 1, y: 0 }}
       draggable={!isReordering}
-      onDragStart={(event) => {
-        event.dataTransfer.effectAllowed = "move";
-        onDragStart();
-      }}
+      onDragStartCapture={handleDragStart}
       onDragEnd={onDragEnd}
       onDragOver={(event) => {
         event.preventDefault();

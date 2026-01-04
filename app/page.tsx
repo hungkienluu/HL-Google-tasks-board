@@ -2,9 +2,13 @@ import { QuickAddBar } from "@/components/QuickAddBar";
 import { BoardView } from "@/components/board/BoardView";
 import { SyncControls } from "@/components/SyncControls";
 import { sampleTasks } from "@/lib/tasks/sampleData";
+import { getServerSession } from "next-auth";
+import { authOptions } from "@/lib/auth";
+import { ConnectGooglePrompt } from "@/components/ConnectGooglePrompt";
 
 export default async function HomePage() {
   // In production, fetch tasks from Google Tasks via fetchTasksByList server action.
+  const session = await getServerSession(authOptions);
   const tasksByList = sampleTasks;
 
   return (
@@ -17,11 +21,17 @@ export default async function HomePage() {
             AI triage engine for Gemini-created Google Tasks. Sync, route, and visualize in one place.
           </p>
         </div>
-        <SyncControls />
+        {session && <SyncControls />}
       </header>
 
-      <QuickAddBar />
-      <BoardView tasksByList={tasksByList} />
+      {session ? (
+        <>
+          <QuickAddBar />
+          <BoardView tasksByList={tasksByList} />
+        </>
+      ) : (
+        <ConnectGooglePrompt />
+      )}
     </main>
   );
 }

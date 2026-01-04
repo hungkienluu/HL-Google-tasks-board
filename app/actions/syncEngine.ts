@@ -10,6 +10,20 @@ import { listRoutingCatalog, type Task, type TaskListSummary, type TaskListWithT
 const DEFAULT_LIST_ID = process.env.DEFAULT_TASKLIST_ID ?? "@default";
 
 type ResolvedListMap = Map<string, string>;
+type Tasklist = { id?: string | null; title?: string | null };
+
+async function listAllTasklists(tasksClient: Awaited<ReturnType<typeof getAuthorizedTasksClient>>) {
+  const available: Tasklist[] = [];
+  let pageToken: string | undefined;
+
+  do {
+    const response = await tasksClient.tasklists.list({ pageToken });
+    available.push(...(response.data.items ?? []));
+    pageToken = response.data.nextPageToken ?? undefined;
+  } while (pageToken);
+
+  return available;
+}
 
 function normalizeDueDate(due?: string | null) {
   if (!due) return undefined;
@@ -29,10 +43,9 @@ function normalizeCompletedTimestamp(completed?: string | null) {
 }
 
 async function resolveTasklists(tasksClient: Awaited<ReturnType<typeof getAuthorizedTasksClient>>) {
-  const tasklistsResponse = await tasksClient.tasklists.list();
-  const available = tasklistsResponse.data.items ?? [];
+  const available = await listAllTasklists(tasksClient);
   const normalizedTitle = (value?: string | null) => value?.trim().toLowerCase();
-  const matchesList = (list: { id?: string | null; title?: string | null }, candidate?: string | null) =>
+  const matchesList = (list: Tasklist, candidate?: string | null) =>
     !!candidate && (list.id === candidate || normalizedTitle(list.title) === normalizedTitle(candidate));
 
   const resolved: ResolvedListMap = new Map();

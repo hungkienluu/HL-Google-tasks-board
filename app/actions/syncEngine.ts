@@ -119,7 +119,7 @@ export async function fetchTasksByList(): Promise<Record<string, Task[]>> {
         updated: item.updated ?? undefined,
         listId: listRule.tasklistId,
         targetList: listRule.key,
-        urgency: parseTaskIntent(item.title).urgency
+        urgency: parseTaskIntent(item.title ?? "").urgency
       }));
   }
 

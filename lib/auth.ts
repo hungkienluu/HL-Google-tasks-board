@@ -24,6 +24,7 @@ const refreshAccessToken = async (token: JWT): Promise<JWT> => {
     return {
       ...token,
       accessToken: refreshedTokens.access_token,
+      refreshToken: refreshedTokens.refresh_token ?? token.refreshToken,
       expiresAt: Date.now() + refreshedTokens.expires_in * 1000
     };
   } catch (error) {
@@ -39,20 +40,26 @@ export const authOptions: AuthOptions = {
       clientSecret: process.env.GOOGLE_CLIENT_SECRET ?? "",
       authorization: {
         params: {
-          scope: "openid email profile https://www.googleapis.com/auth/tasks"
+          scope: "openid email profile https://www.googleapis.com/auth/tasks",
+          access_type: "offline",
+          prompt: "consent"
         }
       }
     })
   ],
+  secret: process.env.NEXTAUTH_SECRET,
   session: {
     strategy: "jwt"
   },
   callbacks: {
     async jwt({ token, account }) {
       if (account) {
-        token.accessToken = account.access_token;
-        token.refreshToken = account.refresh_token;
-        token.expiresAt = (account.expires_at ?? 0) * 1000;
+        return {
+          ...token,
+          accessToken: account.access_token,
+          refreshToken: account.refresh_token ?? token.refreshToken,
+          expiresAt: (account.expires_at ?? 0) * 1000
+        };
       }
 
       if (token.expiresAt && Date.now() < (token.expiresAt as number) - 60_000) {
@@ -70,11 +77,13 @@ export const authOptions: AuthOptions = {
         accessToken?: string;
         refreshToken?: string;
         expiresAt?: number;
+        error?: string;
       } = {
         ...session,
         accessToken: token.accessToken as string,
         refreshToken: token.refreshToken as string,
-        expiresAt: token.expiresAt as number
+        expiresAt: token.expiresAt as number,
+        error: token.error as string
       };
       return enrichedSession;
     }

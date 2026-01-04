@@ -11,6 +11,16 @@ const DEFAULT_LIST_ID = process.env.DEFAULT_TASKLIST_ID ?? "@default";
 
 type ResolvedListMap = Map<string, string>;
 
+function normalizeDueDate(due?: string | null) {
+  if (!due) return undefined;
+
+  const [datePart] = due.split("T");
+  if (!datePart) return undefined;
+
+  const normalized = new Date(`${datePart}T00:00:00.000Z`);
+  return Number.isNaN(normalized.getTime()) ? undefined : normalized.toISOString();
+}
+
 async function resolveTasklists(tasksClient: Awaited<ReturnType<typeof getAuthorizedTasksClient>>) {
   const tasklistsResponse = await tasksClient.tasklists.list();
   const available = tasklistsResponse.data.items ?? [];
@@ -91,8 +101,8 @@ export async function syncDefaultList(): Promise<{ moved: number; inspected: num
         title: task.title,
         notes,
         status: task.status,
-        due: task.due,
-        completed: task.completed
+        due: normalizeDueDate(task.due),
+        completed: task.status === "completed" ? task.completed ?? new Date().toISOString() : undefined
       }
     });
 
@@ -154,6 +164,13 @@ export async function moveTasksToList(destinationListId: string, tasksToMove: Ta
   }
 
   const tasksClient = await getAuthorizedTasksClient();
+  const { available } = await resolveTasklists(tasksClient);
+  const destinationExists = available.some((list) => list.id === destinationListId);
+
+  if (!destinationExists) {
+    throw new Error(`Destination list ${destinationListId} could not be found`);
+  }
+
   let moved = 0;
 
   for (const task of tasksToMove) {
@@ -165,7 +182,7 @@ export async function moveTasksToList(destinationListId: string, tasksToMove: Ta
         title: task.title,
         notes: task.notes,
         status: task.status,
-        due: task.due,
+        due: normalizeDueDate(task.due),
         completed: task.status === "completed" ? new Date().toISOString() : undefined
       }
     });

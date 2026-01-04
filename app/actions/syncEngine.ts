@@ -15,22 +15,27 @@ async function resolveTasklists(tasksClient: Awaited<ReturnType<typeof getAuthor
   const tasklistsResponse = await tasksClient.tasklists.list();
   const available = tasklistsResponse.data.items ?? [];
   const normalizedTitle = (value?: string | null) => value?.trim().toLowerCase();
+  const matchesList = (list: { id?: string | null; title?: string | null }, candidate?: string | null) =>
+    !!candidate && (list.id === candidate || normalizedTitle(list.title) === normalizedTitle(candidate));
 
   const resolved: ResolvedListMap = new Map();
   for (const rule of listRoutingCatalog) {
     const envId = rule.tasklistId;
-    const matched = available.find(
-      (list) => list.id === envId || normalizedTitle(list.title) === normalizedTitle(rule.label)
-    );
+    const matched = available.find((list) => matchesList(list, envId) || matchesList(list, rule.label));
     if (matched?.id) {
       resolved.set(rule.key, matched.id);
     }
   }
 
   const defaultMatch = available.find(
-    (list) => list.id === DEFAULT_LIST_ID || list.title?.toLowerCase() === "my tasks"
+    (list) => matchesList(list, DEFAULT_LIST_ID) || matchesList(list, "My Tasks") || list.id === "@default"
   );
-  resolved.set("default", defaultMatch?.id ?? DEFAULT_LIST_ID);
+  if (!defaultMatch?.id) {
+    throw new Error(
+      "Unable to resolve your default Google Tasks list. Set DEFAULT_TASKLIST_ID to a valid list ID or ensure your account has a 'My Tasks' list."
+    );
+  }
+  resolved.set("default", defaultMatch.id);
   return { resolved, available };
 }
 

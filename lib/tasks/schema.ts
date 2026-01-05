@@ -25,6 +25,7 @@ export const TaskSchema = z.object({
   title: z.string(),
   notes: z.string().optional(),
   status: z.enum(["needsAction", "completed"]).default("needsAction"),
+  position: z.string().optional(),
   due: z.string().optional(),
   updated: z.string().optional(),
   listId: z.string(),

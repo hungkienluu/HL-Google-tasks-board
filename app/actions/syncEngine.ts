@@ -297,12 +297,20 @@ export async function fetchTasklistsWithTasks(listIds?: string[]): Promise<TaskL
           title: item.title!,
           notes: item.notes ?? undefined,
           status: (item.status as Task["status"]) ?? "needsAction",
+          position: item.position ?? undefined,
           due: item.due ?? undefined,
           updated: item.updated ?? undefined,
           listId: list.id!,
           targetList: parsed.targetList,
           urgency: parsed.urgency
         };
+      })
+      .sort((left, right) => {
+        if (left.position && right.position) return left.position.localeCompare(right.position);
+        if (left.position) return -1;
+        if (right.position) return 1;
+        if (left.updated && right.updated) return left.updated.localeCompare(right.updated);
+        return left.title.localeCompare(right.title);
       });
 
     results.push({

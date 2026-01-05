@@ -284,7 +284,7 @@ export async function fetchTasklistsWithTasks(listIds?: string[]): Promise<TaskL
   const results: TaskListWithTasks[] = [];
   for (const list of filtered) {
     if (!list.id) continue;
-    const response = await tasksClient.tasks.list({ tasklist: list.id });
+    const response = await tasksClient.tasks.list({ tasklist: list.id, showCompleted: true, showHidden: true });
     const items = response.data.items ?? [];
     const tasks = items
       .filter((item) => item.id && item.title)
@@ -299,6 +299,8 @@ export async function fetchTasklistsWithTasks(listIds?: string[]): Promise<TaskL
           due: item.due ?? undefined,
           updated: item.updated ?? undefined,
           listId: list.id!,
+          sourceListTitle: list.title ?? "Untitled list",
+          starred: (item as { starred?: boolean }).starred ?? false,
           targetList: parsed.targetList,
           urgency: parsed.urgency
         };
@@ -316,6 +318,16 @@ export async function fetchTasklistsWithTasks(listIds?: string[]): Promise<TaskL
       title: list.title ?? "Untitled list",
       isDefault: (list.id === DEFAULT_LIST_ID || list.title?.toLowerCase() === "my tasks") ?? false,
       tasks
+    });
+  }
+
+  const starredTasks = results.flatMap((list) => list.tasks.filter((task) => task.starred));
+  if (starredTasks.length > 0) {
+    results.push({
+      id: "starred",
+      title: "Starred",
+      isDefault: false,
+      tasks: starredTasks
     });
   }
 

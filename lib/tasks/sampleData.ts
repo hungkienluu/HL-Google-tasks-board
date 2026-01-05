@@ -10,6 +10,8 @@ export const sampleTasks: Record<string, Task[]> = {
       due: undefined,
       updated: undefined,
       listId: "FAMILY_LIST_ID",
+      sourceListTitle: "Family",
+      starred: true,
       targetList: "family",
       urgency: "high"
     }
@@ -23,6 +25,8 @@ export const sampleTasks: Record<string, Task[]> = {
       due: undefined,
       updated: undefined,
       listId: "HOME_IMPROVEMENT_LIST_ID",
+      sourceListTitle: "Home Improvement",
+      starred: false,
       targetList: "homeImprovement",
       urgency: "medium"
     }
@@ -36,6 +40,8 @@ export const sampleTasks: Record<string, Task[]> = {
       due: undefined,
       updated: undefined,
       listId: "HOME_MAINTENANCE_LIST_ID",
+      sourceListTitle: "Home Maintenance",
+      starred: false,
       targetList: "homeMaintenance",
       urgency: "low"
     }
@@ -49,6 +55,8 @@ export const sampleTasks: Record<string, Task[]> = {
       due: undefined,
       updated: undefined,
       listId: "SQUARE_LIST_ID",
+      sourceListTitle: "Square",
+      starred: true,
       targetList: "square",
       urgency: "high"
     }

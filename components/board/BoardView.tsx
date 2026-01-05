@@ -112,7 +112,7 @@ const TaskCard = forwardRef<HTMLDivElement, TaskCardProps>(function TaskCard(
             type="button"
             aria-label={`Reorder ${task.title}`}
             data-dnd-handle
-            className="mt-1 flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-slate-200 bg-white text-slate-600 transition hover:border-slate-300 hover:text-slate-900 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-900"
+            className="mt-1 flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-slate-200 bg-white text-slate-600 transition hover:border-slate-300 hover:text-slate-900 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-900 touch-none select-none cursor-grab active:cursor-grabbing"
             {...(handleProps ?? {})}
           >
             <span aria-hidden className="text-lg leading-none">⋮⋮</span>
@@ -182,7 +182,8 @@ export function BoardView({ tasklists }: BoardViewProps) {
   const sensors = useSensors(
     useSensor(PointerSensor, {
       activationConstraint: {
-        distance: 6
+        delay: 120,
+        tolerance: 8
       }
     })
   );

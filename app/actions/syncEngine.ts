@@ -264,8 +264,6 @@ export async function reorderTask(tasklistId: string, taskId: string, previousTa
     task: taskId,
     previous: previousTaskId
   });
-
-  revalidatePath("/");
 }
 
 export async function fetchTasklists(): Promise<TaskListSummary[]> {

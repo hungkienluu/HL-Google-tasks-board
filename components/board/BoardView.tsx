@@ -343,32 +343,24 @@ export function BoardView({ tasklists }: BoardViewProps) {
 
     if (active.id !== over.id) {
       const listId = activeData.listId;
-      let previousTaskId: string | undefined;
-      let shouldPersist = false;
-      let rollbackState: TaskListWithTasks[] | null = null;
+      const rollbackState = tasklistsState.map((list) => ({ ...list, tasks: [...(list.tasks ?? [])] }));
+      const listIndex = tasklistsState.findIndex((list) => list.id === listId);
+      const tasks = tasklistsState[listIndex]?.tasks ?? [];
+      const oldIndex = tasks.findIndex((task) => task.id === activeData.task.id);
+      const newIndex = tasks.findIndex((task) => task.id === overData.task.id);
 
-      setTasklistsState((current) => {
-        rollbackState = current.map((list) => ({ ...list, tasks: [...(list.tasks ?? [])] }));
+      if (oldIndex !== -1 && newIndex !== -1 && oldIndex !== newIndex) {
+        const reordered = arrayMove(tasks, oldIndex, newIndex);
+        const previousTaskId = reordered[newIndex - 1]?.id;
 
-        return current.map((list) => {
-          if (list.id !== listId) return list;
-          const tasks = list.tasks ?? [];
-          const oldIndex = tasks.findIndex((task) => task.id === activeData.task.id);
-          const newIndex = tasks.findIndex((task) => task.id === overData.task.id);
-          if (oldIndex === -1 || newIndex === -1 || oldIndex === newIndex) return list;
-          const reordered = arrayMove(tasks, oldIndex, newIndex);
-          previousTaskId = reordered[newIndex - 1]?.id;
-          shouldPersist = true;
-          return { ...list, tasks: reordered };
-        });
-      });
+        setTasklistsState((current) =>
+          current.map((list) => (list.id === listId ? { ...list, tasks: reordered } : list))
+        );
 
-      if (shouldPersist) {
-        const safeRollback = rollbackState;
         startActionTransition(() => {
           reorderTask(listId, activeData.task.id, previousTaskId).catch((error) => {
             console.error("Failed to reorder task", error);
-            if (safeRollback) setTasklistsState(safeRollback);
+            setTasklistsState(rollbackState);
           });
         });
       }

@@ -29,6 +29,8 @@ export const TaskSchema = z.object({
   due: z.string().optional(),
   updated: z.string().optional(),
   listId: z.string(),
+  sourceListTitle: z.string().optional(),
+  starred: z.boolean().default(false),
   targetList: z.enum(routingListKeys),
   urgency: z.enum(urgencyLevels)
 });

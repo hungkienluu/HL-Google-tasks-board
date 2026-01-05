@@ -27,7 +27,6 @@ import clsx from "clsx";
 import { AnimatePresence, motion } from "framer-motion";
 import type { Task, TaskListWithTasks } from "@/lib/tasks/schema";
 import {
-  clearCompletedInList,
   moveTasksToList,
   reorderTask,
   syncDefaultList
@@ -178,6 +177,7 @@ export function BoardView({ tasklists }: BoardViewProps) {
   const [isPending, startTransition] = useTransition();
   const [isActionPending, startActionTransition] = useTransition();
   const [activeDragTask, setActiveDragTask] = useState<ActiveDragTask>(null);
+  const [showCompleted, setShowCompleted] = useState(false);
 
   const sensors = useSensors(
     useSensor(PointerSensor, {
@@ -222,15 +222,39 @@ export function BoardView({ tasklists }: BoardViewProps) {
   useEffect(() => {
     const selectionListIds = Array.from(selectedTaskIds).map((key) => key.split(":")[0]);
     const uniqueListIds = Array.from(new Set(selectionListIds));
-    const firstDifferentList = tasklistsState.find((list) => list.id !== uniqueListIds[0]);
+    const firstDifferentList = tasklistsState.find(
+      (list) => list.id !== uniqueListIds[0] && list.id !== "starred"
+    );
     if (!destinationListId && firstDifferentList) {
       setDestinationListId(firstDifferentList.id);
     }
-    if (destinationListId && selectionListIds.length > 0 && uniqueListIds.includes(destinationListId)) {
-      const alternative = tasklistsState.find((list) => list.id !== uniqueListIds[0]);
+    if (
+      destinationListId &&
+      selectionListIds.length > 0 &&
+      (uniqueListIds.includes(destinationListId) || destinationListId === "starred")
+    ) {
+      const alternative = tasklistsState.find(
+        (list) => list.id !== uniqueListIds[0] && list.id !== "starred"
+      );
       if (alternative) setDestinationListId(alternative.id);
     }
   }, [destinationListId, selectedTaskIds, tasklistsState]);
+
+  useEffect(() => {
+    if (showCompleted) return;
+    setSelectedTaskIds((current) => {
+      const next = new Set<string>();
+      tasklistsState.forEach((list) => {
+        (list.tasks ?? []).forEach((task) => {
+          const key = `${task.listId ?? list.id}:${task.id}`;
+          if (task.status !== "completed" && current.has(key)) {
+            next.add(key);
+          }
+        });
+      });
+      return next;
+    });
+  }, [showCompleted, tasklistsState]);
 
   const toggleList = (id: string) => {
     setVisibleListIds((current) => {
@@ -246,22 +270,38 @@ export function BoardView({ tasklists }: BoardViewProps) {
   const columns = useMemo(
     () =>
       tasklistsState
-        .map((list) => ({
-          key: list.id,
-          label: list.title,
-          isDefault: list.isDefault,
-          tasks: [...(list.tasks ?? [])]
-        }))
+        .map((list) => {
+          const tasks = [...(list.tasks ?? [])];
+          const visibleTasks = showCompleted ? tasks : tasks.filter((task) => task.status !== "completed");
+          const hiddenCompleted = showCompleted ? 0 : tasks.filter((task) => task.status === "completed").length;
+          return {
+            key: list.id,
+            label: list.title,
+            isDefault: list.isDefault,
+            tasks: visibleTasks,
+            totalTasks: tasks.length,
+            hiddenCompleted
+          };
+        })
         .filter((column) => visibleListIds.includes(column.key)),
-    [tasklistsState, visibleListIds]
+    [showCompleted, tasklistsState, visibleListIds]
   );
 
   const selectedTasks = useMemo(
-    () =>
-      tasklistsState
-        .flatMap((list) => (list.tasks ?? []).map((task) => ({ ...task, listId: list.id })))
-        .filter((task) => selectedTaskIds.has(`${task.listId}:${task.id}`)),
-    [selectedTaskIds, tasklistsState]
+    () => {
+      const seen = new Set<string>();
+      return tasklistsState
+        .flatMap((list) => list.tasks ?? [])
+        .filter((task) => selectedTaskIds.has(`${task.listId}:${task.id}`))
+        .filter((task) => showCompleted || task.status !== "completed")
+        .filter((task) => {
+          const key = `${task.listId}:${task.id}`;
+          if (seen.has(key)) return false;
+          seen.add(key);
+          return true;
+        });
+    },
+    [selectedTaskIds, showCompleted, tasklistsState]
   );
 
   const selectedListIds = useMemo(
@@ -284,9 +324,9 @@ export function BoardView({ tasklists }: BoardViewProps) {
     });
   };
 
-  const handleToggleAllInList = (listId: string, tasks: Task[]) => {
+  const handleToggleAllInList = (tasks: Task[]) => {
     setSelectedTaskIds((current) => {
-      const allKeys = tasks.map((task) => `${listId}:${task.id}`);
+      const allKeys = tasks.map((task) => `${task.listId}:${task.id}`);
       const hasAllSelected = allKeys.every((key) => current.has(key));
       const next = new Set(current);
       if (hasAllSelected) {
@@ -311,15 +351,24 @@ export function BoardView({ tasklists }: BoardViewProps) {
 
   const clearSelection = () => setSelectedTaskIds(new Set());
 
+  const toggleShowCompleted = () => setShowCompleted((current) => !current);
+
   const focusTasks = useMemo(
     () =>
       tasklistsState
-        .flatMap((list) => (list.tasks ?? []).map((task) => ({ ...task, listTitle: list.title })))
+        .flatMap((list) =>
+          (list.tasks ?? []).map((task) => ({
+            ...task,
+            listTitle: task.sourceListTitle ?? list.title
+          }))
+        )
         .filter((task) => task.status !== "completed" && task.title.includes("🔥")),
     [tasklistsState]
   );
 
   const toSortableId = (view: ViewKey, listId: string, taskId: string) => `${view}:${listId}:${taskId}`;
+  const sortableIdForColumn = (view: ViewKey, columnKey: string, task: Task) =>
+    toSortableId(view, `${columnKey}:${task.listId}`, task.id);
 
   const handleDragStart = ({ active }: DragStartEvent) => {
     const data = active.data.current as SortableTaskMeta | undefined;
@@ -379,7 +428,8 @@ export function BoardView({ tasklists }: BoardViewProps) {
     listTitle,
     isSelected,
     onToggle,
-    onViewDetails
+    onViewDetails,
+    sortableId
   }: {
     view: ViewKey;
     task: Task;
@@ -388,9 +438,10 @@ export function BoardView({ tasklists }: BoardViewProps) {
     isSelected: boolean;
     onToggle: () => void;
     onViewDetails: () => void;
+    sortableId?: string;
   }) => {
     const { attributes, listeners, setNodeRef, transform, transition, isDragging, isOver } = useSortable({
-      id: toSortableId(view, listId, task.id),
+      id: sortableId ?? toSortableId(view, listId, task.id),
       data: { task, listId },
       disabled: isActionPending
     });
@@ -426,12 +477,6 @@ export function BoardView({ tasklists }: BoardViewProps) {
         />
       </div>
     );
-  };
-
-  const handleClearCompleted = (tasklistId: string) => {
-    startActionTransition(async () => {
-      await clearCompletedInList(tasklistId);
-    });
   };
 
   const handleTriageDefault = (tasklistId: string) => {
@@ -548,7 +593,7 @@ export function BoardView({ tasklists }: BoardViewProps) {
                   Choose destination
                 </option>
                 {tasklistsState
-                  .filter((list) => list.id !== singleSourceListId)
+                  .filter((list) => list.id !== singleSourceListId && list.id !== "starred")
                   .map((list) => (
                     <option key={list.id} value={list.id}>
                       {list.title}
@@ -584,11 +629,11 @@ export function BoardView({ tasklists }: BoardViewProps) {
                   <div className="flex items-center gap-2">
                     <button
                       type="button"
-                      onClick={() => handleClearCompleted(column.key)}
+                      onClick={toggleShowCompleted}
                       disabled={isActionPending}
                       className="rounded-lg border border-slate-300 px-3 py-1 text-xs font-semibold text-slate-700 transition hover:border-slate-400 hover:text-slate-900 disabled:cursor-not-allowed disabled:opacity-60"
                     >
-                      Clear Completed
+                      {showCompleted ? "Hide Completed" : "Show Completed"}
                     </button>
                     {column.isDefault ? (
                       <button
@@ -600,40 +645,47 @@ export function BoardView({ tasklists }: BoardViewProps) {
                         {isActionPending ? "Triaging..." : "Triage Inbox"}
                       </button>
                     ) : null}
-                    <span className="text-xs text-slate-500">{column.tasks.length} tasks</span>
+                    <span className="text-xs text-slate-500">
+                      {column.tasks.length} tasks
+                      {column.hiddenCompleted ? ` · ${column.hiddenCompleted} completed hidden` : ""}
+                    </span>
                   </div>
                 </div>
                 <div className="flex flex-col gap-3">
                   <div className="flex items-center justify-between text-xs text-slate-600">
                     <button
                       type="button"
-                      onClick={() => handleToggleAllInList(column.key, column.tasks)}
+                      onClick={() => handleToggleAllInList(column.tasks)}
                       className="rounded-lg px-2 py-1 font-semibold text-slate-700 transition hover:bg-slate-100"
                     >
-                      {column.tasks.every((task) => selectedTaskIds.has(`${column.key}:${task.id}`))
+                      {column.tasks.every((task) => selectedTaskIds.has(`${task.listId}:${task.id}`))
                         ? "Unselect all"
                         : "Select all"}
                     </button>
                     <span>
-                      {column.tasks.filter((task) => selectedTaskIds.has(`${column.key}:${task.id}`)).length} selected
+                      {column.tasks.filter((task) => selectedTaskIds.has(`${task.listId}:${task.id}`)).length} selected
                     </span>
                   </div>
                   <SortableContext
-                    items={column.tasks.map((task) => toSortableId("desktop", column.key, task.id))}
+                    items={column.tasks.map((task) => sortableIdForColumn("desktop", column.key, task))}
                     strategy={verticalListSortingStrategy}
                   >
-                    {column.tasks.map((task) => (
-                      <SortableTaskCard
-                        key={toSortableId("desktop", column.key, task.id)}
-                        view="desktop"
-                        task={task}
-                        listId={column.key}
-                        listTitle={column.label}
-                        isSelected={selectedTaskIds.has(`${column.key}:${task.id}`)}
-                        onToggle={() => handleToggleTask(column.key, task.id)}
-                        onViewDetails={() => openTaskDetails(task, column.label)}
-                      />
-                    ))}
+                    {column.tasks.map((task) => {
+                      const sortableId = sortableIdForColumn("desktop", column.key, task);
+                      return (
+                        <SortableTaskCard
+                          key={sortableId}
+                          view="desktop"
+                          task={task}
+                          listId={task.listId}
+                          listTitle={task.sourceListTitle ?? column.label}
+                          isSelected={selectedTaskIds.has(`${task.listId}:${task.id}`)}
+                          onToggle={() => handleToggleTask(task.listId, task.id)}
+                          onViewDetails={() => openTaskDetails(task, task.sourceListTitle ?? column.label)}
+                          sortableId={sortableId}
+                        />
+                      );
+                    })}
                   </SortableContext>
                 </div>
               </div>
@@ -662,11 +714,11 @@ export function BoardView({ tasklists }: BoardViewProps) {
                   <div className="flex items-center justify-between text-xs text-slate-600">
                     <button
                       type="button"
-                      onClick={() => handleClearCompleted(activeColumn.key)}
+                      onClick={toggleShowCompleted}
                       disabled={isActionPending}
                       className="rounded-lg border border-slate-300 px-3 py-1 font-semibold text-slate-700 transition hover:border-slate-400 hover:text-slate-900 disabled:cursor-not-allowed disabled:opacity-60"
                     >
-                      Clear Completed
+                      {showCompleted ? "Hide Completed" : "Show Completed"}
                     </button>
                     {activeColumn.isDefault ? (
                       <button
@@ -680,21 +732,25 @@ export function BoardView({ tasklists }: BoardViewProps) {
                     ) : null}
                   </div>
                   <SortableContext
-                    items={activeColumn.tasks.map((task) => toSortableId("mobile", activeColumn.key, task.id))}
+                    items={activeColumn.tasks.map((task) => sortableIdForColumn("mobile", activeColumn.key, task))}
                     strategy={verticalListSortingStrategy}
                   >
-                    {activeColumn.tasks.map((task) => (
-                      <SortableTaskCard
-                        key={toSortableId("mobile", activeColumn.key, task.id)}
-                        view="mobile"
-                        task={task}
-                        listId={activeColumn.key}
-                        listTitle={activeListLabel}
-                        isSelected={selectedTaskIds.has(`${activeList}:${task.id}`)}
-                        onToggle={() => handleToggleTask(activeList, task.id)}
-                        onViewDetails={() => openTaskDetails(task, activeListLabel)}
-                      />
-                    ))}
+                    {activeColumn.tasks.map((task) => {
+                      const sortableId = sortableIdForColumn("mobile", activeColumn.key, task);
+                      return (
+                        <SortableTaskCard
+                          key={sortableId}
+                          view="mobile"
+                          task={task}
+                          listId={task.listId}
+                          listTitle={task.sourceListTitle ?? activeListLabel}
+                          isSelected={selectedTaskIds.has(`${task.listId}:${task.id}`)}
+                          onToggle={() => handleToggleTask(task.listId, task.id)}
+                          onViewDetails={() => openTaskDetails(task, task.sourceListTitle ?? activeListLabel)}
+                          sortableId={sortableId}
+                        />
+                      );
+                    })}
                   </SortableContext>
                 </>
               ) : null}
